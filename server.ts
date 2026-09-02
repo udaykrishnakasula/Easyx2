@@ -29,6 +29,7 @@ import { monitoringService } from "./src/server/monitoringService";
 import { BackupService } from "./src/server/backupService";
 import { emailService } from "./src/server/emailService";
 import { promotionsService } from "./src/server/promotionsService";
+import { checkSupabaseConnection, isSupabaseAdminConfigured } from "./src/server/supabaseAdmin";
 
 // ==================== PRODUCTION ENVIRONMENT STARTUP CONFIGURATION ====================
 const isProduction = process.env.NODE_ENV === "production";
@@ -87,7 +88,21 @@ app.get("/health", (_req, res) => {
   res.status(200).json({
     status: "ok",
     timestamp: new Date().toISOString(),
+    supabaseConfigured: isSupabaseAdminConfigured(),
   });
+});
+
+app.get("/api/health/supabase", async (_req, res) => {
+  try {
+    const report = await checkSupabaseConnection();
+    res.status(report.connected ? 200 : 200).json(report);
+  } catch (err: any) {
+    res.status(500).json({
+      configured: isSupabaseAdminConfigured(),
+      connected: false,
+      message: err.message || "Failed to check Supabase status",
+    });
+  }
 });
 
 // ==================== IN-MEMORY RATE LIMITING ENGINE ====================
@@ -847,159 +862,7 @@ const seedDatabase = async () => {
     db.users.set(investorUser.id, investorUser);
   }
 
-  // 2d. Seed initial historical active user base & deposits ONLY in development/test environments
-  const isProd = process.env.NODE_ENV === "production";
-  const nonAdminUsers = Array.from(db.users.values()).filter((u) => u.role !== "admin");
-  if (!isProd && nonAdminUsers.length <= 2) {
-    const historicalInvestors = [
-      { name: "David Vance", email: "david.vance@investor.io", phone: "+14155552011", daysAgo: 42, kyc: "approved", depAmt: "5000.00", net: "TRC20", plan: "platinum" },
-      { name: "Sophia Chen", email: "sophia.chen@cryptoalpha.net", phone: "+6591234567", daysAgo: 38, kyc: "approved", depAmt: "10000.00", net: "BEP20", plan: "diamond" },
-      { name: "Elena Rostova", email: "elena.rostova@globalfin.org", phone: "+447700900142", daysAgo: 35, kyc: "approved", depAmt: "1000.00", net: "TRC20", plan: "gold" },
-      { name: "Marcus Thorne", email: "marcus.thorne@apexholdings.com", phone: "+13125558901", daysAgo: 31, kyc: "approved", depAmt: "3000.00", net: "ERC20", plan: "gold" },
-      { name: "Amara Diallo", email: "amara.diallo@africacapital.com", phone: "+33612345678", daysAgo: 27, kyc: "approved", depAmt: "500.00", net: "TRC20", plan: "silver" },
-      { name: "Liam O'Connor", email: "liam.oconnor@dublininvest.ie", phone: "+353871234567", daysAgo: 24, kyc: "approved", depAmt: "10000.00", net: "BEP20", plan: "diamond" },
-      { name: "Hiroshi Tanaka", email: "hiroshi.tanaka@tokyocapital.jp", phone: "+819012345678", daysAgo: 21, kyc: "approved", depAmt: "5000.00", net: "TRC20", plan: "platinum" },
-      { name: "Zara Al-Mansoor", email: "zara.mansoor@gulfwealth.ae", phone: "+971501234567", daysAgo: 18, kyc: "approved", depAmt: "8500.00", net: "BEP20", plan: "platinum" },
-      { name: "Lucas Meyer", email: "lucas.meyer@berlinventures.de", phone: "+4915123456789", daysAgo: 15, kyc: "approved", depAmt: "1000.00", net: "TRC20", plan: "gold" },
-      { name: "Camila Santos", email: "camila.santos@saopaulocrypto.br", phone: "+5511987654321", daysAgo: 12, kyc: "pending", depAmt: "300.00", net: "BEP20", plan: "silver" },
-      { name: "Vikram Malhotra", email: "vikram.malhotra@mumbaiwealth.in", phone: "+919811223344", daysAgo: 9, kyc: "approved", depAmt: "15000.00", net: "TRC20", plan: "diamond" },
-      { name: "Chloe Dupont", email: "chloe.dupont@parisinvest.fr", phone: "+33698765432", daysAgo: 7, kyc: "approved", depAmt: "2500.00", net: "BEP20", plan: "gold" },
-      { name: "Mateo Silva", email: "mateo.silva@madridholdings.es", phone: "+34612345678", daysAgo: 5, kyc: "pending", depAmt: "1000.00", net: "TRC20", plan: "gold" },
-      { name: "Kavita Rao", email: "kavita.rao@bangalorefin.in", phone: "+919988776655", daysAgo: 3, kyc: "approved", depAmt: "5000.00", net: "BEP20", plan: "platinum" },
-      { name: "Alexander Wright", email: "alex.wright@londoncapital.uk", phone: "+447911123456", daysAgo: 2, kyc: "none", depAmt: "300.00", net: "TRC20", plan: null },
-      { name: "Fatima Zahra", email: "fatima.zahra@casablancafund.ma", phone: "+212661234567", daysAgo: 1, kyc: "pending", depAmt: "1200.00", net: "TRC20", plan: null },
-      { name: "Ethan Brooks", email: "ethan.brooks@austincap.io", phone: "+15125559876", daysAgo: 0, kyc: "approved", depAmt: "6000.00", net: "BEP20", plan: "platinum" },
-    ];
-
-    for (const inv of historicalInvestors) {
-      const joinTs = new Date(Date.now() - inv.daysAgo * 86400000 - Math.floor(Math.random() * 10000000)).toISOString();
-      const uId = "usr-demo-" + genId().substring(0, 8);
-      const userDoc = {
-        id: uId,
-        name: inv.name,
-        email: inv.email,
-        phone: inv.phone,
-        password_hash: userHash,
-        role: "user" as const,
-        email_verified: true,
-        kyc_status: inv.kyc,
-        status: "active" as const,
-        referral_code: "EX" + (inv.name?.split(" ")?.[0] || "INV").toUpperCase() + Math.floor(10 + Math.random() * 89),
-        referred_by: null,
-        created_at: joinTs,
-        last_login_at: joinTs,
-      };
-      db.users.set(uId, userDoc);
-
-      const wallet = getOrCreateWallet(uId);
-      wallet.created_at = joinTs;
-      wallet.updated_at = joinTs;
-
-      // Add deposit
-      if (inv.depAmt) {
-        const depId = "dep-" + genId().substring(0, 8);
-        const depStatus = inv.daysAgo === 0 && Math.random() > 0.6 ? "pending" : "approved";
-        const isApproved = depStatus === "approved";
-        db.deposits.set(depId, {
-          id: depId,
-          user_id: uId,
-          network: inv.net,
-          amount: inv.depAmt,
-          approved_amount: isApproved ? inv.depAmt : null,
-          to_address: inv.net === "TRC20" ? "TYDzsYUEpvnYmQk4zGP9sWWcTEd3ZiUSDT" : "0x71C8366420A0926793023680557456729000BEP",
-          tx_hash: "0x" + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(""),
-          proof_images: [],
-          status: depStatus,
-          admin_note: isApproved ? "Automated blockchain verification match" : null,
-          admin_id: isApproved ? adminId : null,
-          decided_at: isApproved ? joinTs : null,
-          created_at: joinTs,
-          updated_at: joinTs,
-        });
-
-        if (isApproved) {
-          const bal = Number(inv.depAmt);
-          wallet.available_balance = fmt(bal);
-          db.wallet_transactions.set(genId(), {
-            id: genId(),
-            wallet_id: wallet.id,
-            user_id: uId,
-            type: "DEPOSIT",
-            direction: "credit",
-            amount: fmt(bal),
-            balance_after: fmt(bal),
-            ref_type: "deposit",
-            ref_id: depId,
-            status: "completed",
-            idempotency_key: null,
-            note: "USDT Deposit credited",
-            created_at: joinTs,
-            created_by: uId,
-          });
-
-          // Add investment if specified
-          if (inv.plan) {
-            const planObj = defaultPlans.find((p) => p.key === inv.plan) || defaultPlans[0];
-            const pAmt = Number(inv.depAmt);
-            const lockDays = planObj.lock_days || 60;
-            const maturityDate = new Date(new Date(joinTs).getTime() + lockDays * 86400000).toISOString();
-            const invId = "inv-" + genId().substring(0, 8);
-            
-            db.investments.set(invId, {
-              id: invId,
-              user_id: uId,
-              plan_key: inv.plan,
-              plan_name: planObj.name,
-              principal: fmt(pAmt),
-              lock_days: lockDays,
-              profit_percentage: planObj.profit_percentage,
-              maturity_percentage: planObj.maturity_percentage,
-              expected_profit: fmt(pAmt * (Number(planObj.profit_percentage) / 100)),
-              expected_payout: fmt(pAmt * (Number(planObj.maturity_percentage) / 100)),
-              start_at: joinTs,
-              maturity_at: maturityDate,
-              status: "active",
-              payout_status: "locked",
-              payout_released_at: null,
-              created_at: joinTs,
-              updated_at: joinTs,
-            });
-
-            wallet.total_invested = fmt(Number(wallet.total_invested || 0) + pAmt);
-            wallet.available_balance = fmt(Math.max(0, bal - pAmt));
-          }
-        }
-      }
-
-      // Add KYC record if approved or pending
-      if (inv.kyc === "approved" || inv.kyc === "pending") {
-        const kycId = "kyc-" + genId().substring(0, 8);
-        db.kyc_records.set(kycId, {
-          id: kycId,
-          user_id: uId,
-          user_name: inv.name,
-          user_email: inv.email,
-          country: "US",
-          id_type: "passport",
-          id_number_masked: "•••• " + Math.floor(1000 + Math.random() * 9000),
-          id_number_present: true,
-          status: inv.kyc,
-          reject_reason: null,
-          documents: [],
-          submitted_at: joinTs,
-          decided_at: inv.kyc === "approved" ? joinTs : null,
-          admin_id: inv.kyc === "approved" ? adminId : null,
-          created_at: joinTs,
-          updated_at: joinTs,
-        });
-      }
-    }
-    console.log(`[EasyX DB] Seeded ${historicalInvestors.length} historical investor profiles and growth records.`);
-  } else if (isProd) {
-    console.log(`[EasyX DB] Production mode active: Bypassing demo user accounts and synthetic seed data.`);
-  }
-
-  // Admin audit initialization
+  // Clean initialization — No dummy users, fake investments, or mock transaction data
   if (db.audit_logs.length === 0) {
     db.audit_logs.push({
       id: genId(),
@@ -1011,215 +874,18 @@ const seedDatabase = async () => {
       entity_type: "system",
       entity_id: "platform",
       amount: null,
-      reason: "Production system initialized in clean state",
+      reason: "System initialized in clean state",
       meta: { version: "1.0.0" },
       created_at: ts,
     });
   }
 
-  // Analytics events seed initialization (Development only)
-  if (!isProd && db.analytics_events.length === 0) {
-    const seedNow = Date.now();
-    const seedEvents = [
-      // Deposit Funnel Events
-      {
-        id: "evt_seed_1",
-        timestamp: new Date(seedNow - 140 * 60000).toISOString(),
-        user: { id: "u_demo_1", email: "alice.vance@easyx.io", role: "user" },
-        route: "/deposit",
-        category: "FUNNEL",
-        action: "FUNNEL_START",
-        funnelName: "Deposit",
-        step: "view_deposit_page",
-        metadata: { network: "TRC20" },
-      },
-      {
-        id: "evt_seed_2",
-        timestamp: new Date(seedNow - 138 * 60000).toISOString(),
-        user: { id: "u_demo_1", email: "alice.vance@easyx.io", role: "user" },
-        route: "/deposit",
-        category: "FUNNEL",
-        action: "FUNNEL_STEP",
-        funnelName: "Deposit",
-        step: "network_selected",
-        metadata: { network: "TRC20", amount: "1000.00" },
-      },
-      {
-        id: "evt_seed_3",
-        timestamp: new Date(seedNow - 136 * 60000).toISOString(),
-        user: { id: "u_demo_1", email: "alice.vance@easyx.io", role: "user" },
-        route: "/deposit",
-        category: "FUNNEL",
-        action: "FUNNEL_COMPLETE",
-        funnelName: "Deposit",
-        step: "completed",
-        durationSeconds: 240,
-        metadata: { network: "TRC20", amount: "1000.00", totalSteps: 3 },
-      },
-      // KYC Funnel Events
-      {
-        id: "evt_seed_4",
-        timestamp: new Date(seedNow - 90 * 60000).toISOString(),
-        user: { id: "u_demo_2", email: "bob.ross@easyx.io", role: "user" },
-        route: "/kyc",
-        category: "FUNNEL",
-        action: "FUNNEL_START",
-        funnelName: "KYC",
-        step: "view_kyc_page",
-      },
-      {
-        id: "evt_seed_5",
-        timestamp: new Date(seedNow - 85 * 60000).toISOString(),
-        user: { id: "u_demo_2", email: "bob.ross@easyx.io", role: "user" },
-        route: "/kyc",
-        category: "FUNNEL",
-        action: "FUNNEL_STEP",
-        funnelName: "KYC",
-        step: "document_uploaded",
-        metadata: { documentType: "PASSPORT" },
-      },
-      {
-        id: "evt_seed_6",
-        timestamp: new Date(seedNow - 80 * 60000).toISOString(),
-        user: { id: "u_demo_2", email: "bob.ross@easyx.io", role: "user" },
-        route: "/kyc",
-        category: "FUNNEL",
-        action: "FUNNEL_COMPLETE",
-        funnelName: "KYC",
-        step: "completed",
-        durationSeconds: 600,
-        metadata: { documentType: "PASSPORT", livenessCheckPassed: true },
-      },
-      // Investment Funnel Abandonment
-      {
-        id: "evt_seed_7",
-        timestamp: new Date(seedNow - 60 * 60000).toISOString(),
-        user: { id: "u_demo_3", email: "carol.danvers@easyx.io", role: "user" },
-        route: "/investments",
-        category: "FUNNEL",
-        action: "FUNNEL_START",
-        funnelName: "Investment",
-        step: "view_plans_catalog",
-      },
-      {
-        id: "evt_seed_8",
-        timestamp: new Date(seedNow - 55 * 60000).toISOString(),
-        user: { id: "u_demo_3", email: "carol.danvers@easyx.io", role: "user" },
-        route: "/investments",
-        category: "FUNNEL",
-        action: "FUNNEL_ABANDON",
-        funnelName: "Investment",
-        step: "plan_selected",
-        durationSeconds: 300,
-        metadata: { abandonReason: "insufficient_wallet_balance", planKey: "plan-growth" },
-      },
-      // Rage Clicks
-      {
-        id: "evt_seed_9",
-        timestamp: new Date(seedNow - 35 * 60000).toISOString(),
-        user: { id: "u_demo_4", email: "david.beck@easyx.io", role: "user" },
-        route: "/deposit",
-        category: "UX_FRICTION",
-        action: "RAGE_CLICK",
-        element: "button#copy-deposit-address",
-        elementText: "Copy Deposit Address",
-        clickCount: 4,
-        coordinates: { x: 742, y: 388 },
-        metadata: { durationMs: 720, tag: "button" },
-      },
-      {
-        id: "evt_seed_10",
-        timestamp: new Date(seedNow - 20 * 60000).toISOString(),
-        user: { id: "u_demo_5", email: "elena.rostova@easyx.io", role: "user" },
-        route: "/wallet",
-        category: "UX_FRICTION",
-        action: "RAGE_CLICK",
-        element: "button[data-testid='btn-refresh-balance']",
-        elementText: "Refresh Balance",
-        clickCount: 5,
-        coordinates: { x: 890, y: 155 },
-        metadata: { durationMs: 850, tag: "button" },
-      },
-      // Dead Clicks
-      {
-        id: "evt_seed_11",
-        timestamp: new Date(seedNow - 15 * 60000).toISOString(),
-        user: { id: "u_demo_1", email: "alice.vance@easyx.io", role: "user" },
-        route: "/investments",
-        category: "UX_FRICTION",
-        action: "DEAD_CLICK",
-        element: "span.tab-filter-archived",
-        elementText: "Archived Plans",
-        coordinates: { x: 530, y: 220 },
-        metadata: { note: "Interactive styled element triggered no DOM or state mutation" },
-      },
-      {
-        id: "evt_seed_12",
-        timestamp: new Date(seedNow - 5 * 60000).toISOString(),
-        user: { id: "u_demo_6", email: "frank.castle@easyx.io", role: "user" },
-        route: "/kyc",
-        category: "UX_FRICTION",
-        action: "DEAD_CLICK",
-        element: "button.kyc-guidelines-accordion",
-        elementText: "Document Guidelines",
-        coordinates: { x: 310, y: 490 },
-        metadata: { note: "No state or network update observed" },
-      },
-    ];
-    db.analytics_events = seedEvents;
+  // Ensure telemetry and error logs are clean
+  if (!Array.isArray(db.analytics_events)) {
+    db.analytics_events = [];
   }
-
-  // Error logs seed initialization (Development only)
-  if (!isProd && db.error_logs.length === 0) {
-    const seedNow = Date.now();
-    const seedErrors = [
-      {
-        id: "err_seed_1",
-        timestamp: new Date(seedNow - 110 * 60000).toISOString(),
-        user: { id: "u_demo_3", email: "carol.danvers@easyx.io", role: "user" },
-        route: "/deposit",
-        source: "api_network",
-        severity: "warning",
-        errorName: "HTTP_422_POST",
-        message: "POST /api/deposits failed with status 422: Invalid transaction hash format provided.",
-        stack: "AxiosError: Request failed with status code 422\n    at settle (axios.js:1240)\n    at XMLHttpRequest.onloadend (axios.js:1890)",
-        componentStack: null,
-        metadata: { status: 422, method: "POST", url: "/api/deposits" },
-        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        resolved: true,
-      },
-      {
-        id: "err_seed_2",
-        timestamp: new Date(seedNow - 45 * 60000).toISOString(),
-        user: { id: "u_demo_4", email: "david.beck@easyx.io", role: "user" },
-        route: "/kyc",
-        source: "window.onerror",
-        severity: "error",
-        errorName: "TypeError",
-        message: "Cannot read properties of undefined (reading 'cameraStream')",
-        stack: "TypeError: Cannot read properties of undefined\n    at KYCPage.jsx:214:18\n    at commitHookEffectListMount (react-dom.development.js:23150)",
-        componentStack: "    in VideoCaptureStream\n    in KYCPage (at UserRoutes.jsx:30)",
-        metadata: { lineno: 214, colno: 18, filename: "/src/user/pages/KYCPage.jsx" },
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        resolved: false,
-      },
-      {
-        id: "err_seed_3",
-        timestamp: new Date(seedNow - 12 * 60000).toISOString(),
-        user: { id: "u_demo_7", email: "george.stone@easyx.io", role: "user" },
-        route: "/wallet",
-        source: "unhandledrejection",
-        severity: "critical",
-        errorName: "NetworkTimeoutError",
-        message: "Connection to TronGrid RPC node timed out after 10000ms",
-        stack: "Error: Connection timed out\n    at TronWebProvider.query (tron.js:88)\n    at async fetchBalance (wallet.js:142)",
-        componentStack: null,
-        metadata: { timeoutMs: 10000, endpoint: "https://api.trongrid.io" },
-        userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X)",
-        resolved: false,
-      },
-    ];
-    db.error_logs = seedErrors;
+  if (!Array.isArray(db.error_logs)) {
+    db.error_logs = [];
   }
 
   saveDatabase();

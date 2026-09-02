@@ -19,53 +19,7 @@ export interface PromotionMediaItem {
   updated_at: string;
 }
 
-const DEFAULT_PROMOTIONS: PromotionMediaItem[] = [
-  {
-    id: "promo_1",
-    title: "EasyX Diamond Reserve — 20% Staking Yield Boost",
-    subtitle: "Exclusive high-yield epoch open. Earn daily USDT rewards streamed directly to your active balance with instant compounding.",
-    media_type: "video",
-    media_url: "/gemini_generated_video_78da6d75.mp4",
-    badge_text: "Special Staking Event",
-    badge_color: "amber",
-    cta_text: "Explore Diamond Tier",
-    cta_link: "/investments",
-    status: "PUBLISHED",
-    order: 1,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "promo_2",
-    title: "Institutional Cold-Vault Custody & Real-Time Payouts",
-    subtitle: "Protected by multi-sig institutional encryption. Zero gas fees on instant TRC20 and BEP20 returns.",
-    media_type: "video",
-    media_url: "/gemini_generated_video_ce8e299d.mp4",
-    badge_text: "Security Guaranteed",
-    badge_color: "violet",
-    cta_text: "View Treasury & Wallet",
-    cta_link: "/wallet",
-    status: "PUBLISHED",
-    order: 2,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: "promo_3",
-    title: "Referral Accelerator — Earn Up to 15% Instant Commission",
-    subtitle: "Invite fellow investors and earn tier-based USDT commissions immediately upon certificate plan activation.",
-    media_type: "image",
-    media_url: "/Easyx3dcoin.png",
-    badge_text: "Affiliate Bonus",
-    badge_color: "emerald",
-    cta_text: "Get Referral Link",
-    cta_link: "/referrals",
-    status: "PUBLISHED",
-    order: 3,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
+const DEFAULT_PROMOTIONS: PromotionMediaItem[] = [];
 
 const STORAGE_FILE = path.join(process.cwd(), "promotions_data.json");
 
@@ -89,13 +43,8 @@ export class PromotionsService {
     } catch (e) {
       console.warn("[PromotionsService] Could not read storage file, loading defaults.", e);
     }
-    // Only load initial sample promotions if not in production mode
-    if (process.env.NODE_ENV !== "production") {
-      this.items = [...DEFAULT_PROMOTIONS];
-      this.saveToStorage();
-    } else {
-      this.items = [];
-    }
+    this.items = [];
+    this.saveToStorage();
   }
 
   private saveToStorage() {
