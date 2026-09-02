@@ -39,23 +39,34 @@ const PRIORITIES = [
   { id: "URGENT", label: "Urgent", desc: "Critical account or funding block (SLA < 1h)" },
 ];
 
-export default function CreateTicketModal({ open, onOpenChange, onTicketCreated, defaultCategory = "DEPOSIT" }) {
+export default function CreateTicketModal({
+  open,
+  onOpenChange,
+  onTicketCreated,
+  defaultCategory = "DEPOSIT",
+  defaultSubject = "",
+  defaultMessage = "",
+  defaultPriority = "NORMAL",
+}) {
   const createTicket = useCreateSupportTicket();
 
-  const [subject, setSubject] = useState("");
+  const [subject, setSubject] = useState(defaultSubject || "");
   const [category, setCategory] = useState(defaultCategory || "DEPOSIT");
-  const [priority, setPriority] = useState("NORMAL");
-  const [message, setMessage] = useState("");
+  const [priority, setPriority] = useState(defaultPriority || "NORMAL");
+  const [message, setMessage] = useState(defaultMessage || "");
   const [attachments, setAttachments] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState("");
 
-  // Sync default category when modal opens
+  // Sync default values when modal opens
   React.useEffect(() => {
-    if (open && defaultCategory) {
-      setCategory(defaultCategory);
+    if (open) {
+      if (defaultCategory) setCategory(defaultCategory);
+      if (defaultSubject) setSubject(defaultSubject);
+      if (defaultMessage) setMessage(defaultMessage);
+      if (defaultPriority) setPriority(defaultPriority);
     }
-  }, [open, defaultCategory]);
+  }, [open, defaultCategory, defaultSubject, defaultMessage, defaultPriority]);
 
   const resetForm = () => {
     // Revoke any pending object URLs
@@ -66,10 +77,10 @@ export default function CreateTicketModal({ open, onOpenChange, onTicketCreated,
         } catch (e) {}
       }
     });
-    setSubject("");
+    setSubject(defaultSubject || "");
     setCategory(defaultCategory || "DEPOSIT");
-    setPriority("NORMAL");
-    setMessage("");
+    setPriority(defaultPriority || "NORMAL");
+    setMessage(defaultMessage || "");
     setAttachments([]);
     setIsUploading(false);
     setError("");

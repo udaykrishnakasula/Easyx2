@@ -357,40 +357,41 @@ export const sanitizeProofImage = (rawImg: any): { valid: boolean; value: string
 export const validateFileMagicBytes = (file: Express.Multer.File): boolean => {
   if (!file || !file.buffer || file.buffer.length < 4) return false;
   const buf = file.buffer;
-  const mime = file.mimetype.toLowerCase();
+  const mime = (file.mimetype || "").toLowerCase().trim();
 
-  // Reject files containing dangerous HTML/script strings in the first 256 bytes
-  const headerStr = buf.slice(0, Math.min(buf.length, 256)).toString("utf8").toLowerCase();
+  // Reject files containing dangerous HTML/script strings in the first 512 bytes
+  const headerStr = buf.slice(0, Math.min(buf.length, 512)).toString("utf8").toLowerCase();
   if (
     headerStr.includes("<script") ||
     headerStr.includes("<?php") ||
     headerStr.includes("<html") ||
-    headerStr.includes("<svg") && headerStr.includes("onload")
+    (headerStr.includes("<svg") && headerStr.includes("onload")) ||
+    headerStr.includes("javascript:")
   ) {
     return false;
   }
 
-  // JPEG: FF D8 FF
-  if (mime === "image/jpeg" || mime === "image/jpg") {
-    return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  // Detect genuine file signatures:
+  const isJpeg = buf[0] === 0xff && buf[1] === 0xd8;
+  const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  const isWebp = buf.length >= 12 && buf.toString("utf8", 0, 4) === "RIFF" && (buf.toString("utf8", 8, 12) === "WEBP" || buf.slice(0, 32).toString("utf8").includes("WEBP"));
+  const isPdf = buf.slice(0, Math.min(buf.length, 1024)).toString("utf8").includes("%PDF-");
+
+  if (mime.includes("jpeg") || mime.includes("jpg") || mime.includes("pjpeg")) {
+    return isJpeg || isPng || isWebp;
   }
-  // PNG: 89 50 4E 47
-  if (mime === "image/png") {
-    return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  if (mime.includes("png")) {
+    return isPng || isJpeg || isWebp;
   }
-  // WEBP: RIFF....WEBP
-  if (mime === "image/webp") {
-    return (
-      buf.toString("utf8", 0, 4) === "RIFF" &&
-      buf.toString("utf8", 8, 12) === "WEBP"
-    );
+  if (mime.includes("webp")) {
+    return isWebp || isJpeg || isPng;
   }
-  // PDF: %PDF-
-  if (mime === "application/pdf") {
-    return buf.toString("utf8", 0, 5) === "%PDF-";
+  if (mime.includes("pdf")) {
+    return isPdf;
   }
 
-  return false;
+  // General fallback for valid binary image/document payloads
+  return isJpeg || isPng || isWebp || isPdf;
 };
 
 // Validates whether a cryptocurrency deposit address is a mock/placeholder or a valid blockchain format
@@ -3301,7 +3302,7 @@ api.put("/user/profile", authMiddleware, (req, res) => {
     return res.status(404).json({ detail: "User not found." });
   }
 
-  const { name, phone } = req.body || {};
+  const { name, phone, address, permanent_address } = req.body || {};
   if (typeof name === "string" && name.trim()) {
     if (user.kyc_status === "approved" && name.trim() !== user.name) {
       return res.status(400).json({ detail: "Legal name cannot be modified after KYC verification is approved." });
@@ -3310,6 +3311,16 @@ api.put("/user/profile", authMiddleware, (req, res) => {
   }
   if (typeof phone === "string") {
     user.phone = phone.trim();
+  }
+  if (typeof address === "string" || typeof permanent_address === "string") {
+    if (user.kyc_status === "approved" || user.kyc_status === "pending") {
+      return res.status(400).json({ detail: "Permanent address and ID data are locked and immutable once KYC verification is submitted or approved." });
+    }
+    const newAddr = (address || permanent_address || "").trim();
+    if (newAddr) {
+      user.address = newAddr;
+      user.permanent_address = newAddr;
+    }
   }
 
   saveDatabase();
@@ -3557,8 +3568,14 @@ api.get("/kyc", authMiddleware, (req, res) => {
     return res.json({
       status: "none",
       id_type: null,
+      id_number: null,
+      id_number_masked: null,
+      id_number_present: false,
+      address: user.address || user.permanent_address || null,
+      permanent_address: user.permanent_address || user.address || null,
       reject_reason: null,
       can_submit: true,
+      is_immutable: false,
       submitted_at: null,
       reviewed_at: null,
       documents: [],
@@ -3569,47 +3586,89 @@ api.get("/kyc", authMiddleware, (req, res) => {
     .filter((d) => d.user_id === user.id)
     .map((d) => ({ id: d.id, doc_type: d.doc_type, mime: d.mime, uploaded_at: d.created_at }));
 
+  const isSubmittedOrApproved = ["pending", "submitted", "approved"].includes(rec.status);
+
   res.json({
     status: rec.status,
     id_type: rec.id_type,
-    id_number_present: Boolean(rec.id_number_encrypted),
+    id_number: rec.id_number || rec.id_number_masked || null,
+    id_number_masked: rec.id_number_masked || null,
+    id_number_present: Boolean(rec.id_number || rec.id_number_encrypted),
+    address: rec.address || rec.permanent_address || user.address || null,
+    permanent_address: rec.permanent_address || rec.address || user.permanent_address || user.address || null,
     reject_reason: rec.status === "rejected" ? rec.reject_reason : null,
     submitted_at: rec.submitted_at,
     reviewed_at: rec.reviewed_at,
     can_submit: ["none", "rejected"].includes(rec.status),
+    is_immutable: isSubmittedOrApproved,
     documents: docs,
     liveness: rec.liveness_metadata || null,
   });
 });
 
+const kycUploadFields = upload.fields([
+  { name: "id_document", maxCount: 1 },
+  { name: "id_front_document", maxCount: 1 },
+  { name: "id_back_document", maxCount: 1 },
+  { name: "selfie", maxCount: 1 },
+]);
+
+const kycUploadMiddleware = (req: any, res: any, next: any) => {
+  (kycUploadFields as any)(req, res, (err: any) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(400).json({
+            error: "validation_error",
+            field: err.field || "id_document",
+            detail: "Uploaded document or selfie exceeds maximum allowed size of 5 MB. Please select a smaller file.",
+          });
+        }
+        if (err.code === "LIMIT_UNEXPECTED_FILE") {
+          return res.status(400).json({
+            error: "validation_error",
+            field: err.field || "id_document",
+            detail: `Unexpected upload field: ${err.field}.`,
+          });
+        }
+        return res.status(400).json({
+          error: "validation_error",
+          field: err.field || "id_document",
+          detail: `File upload error: ${err.message}`,
+        });
+      }
+      return res.status(400).json({
+        error: "validation_error",
+        detail: `File processing error: ${err?.message || "Invalid upload"}`,
+      });
+    }
+    next();
+  });
+};
+
 api.post(
   "/kyc/submit",
   authMiddleware,
   fileUploadLimiter,
-  upload.fields([
-    { name: "id_document", maxCount: 1 },
-    { name: "id_front_document", maxCount: 1 },
-    { name: "id_back_document", maxCount: 1 },
-    { name: "selfie", maxCount: 1 },
-  ]) as any,
+  kycUploadMiddleware as any,
   (req, res) => {
     const user = (req as any).user;
-    const { id_type, id_number, liveness_session_id } = req.body;
+    const { id_type, id_number, address, permanent_address, liveness_session_id } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
-    // 1. Validate User Eligibility / State
+    // 1. Validate User Eligibility / State & Immutability
     if (user.kyc_status === "approved") {
       return res.status(400).json({
         error: "validation_error",
-        detail: "Your KYC identity verification is already approved. Resubmission is not required.",
+        detail: "Your KYC identity verification is already approved. ID number, document type, and permanent address are locked and immutable.",
       });
     }
 
     const existingKyc = db.kyc_records.get(user.id);
-    if (existingKyc && existingKyc.status === "pending") {
+    if (existingKyc && (existingKyc.status === "pending" || existingKyc.status === "submitted")) {
       return res.status(400).json({
         error: "validation_error",
-        detail: "Your KYC verification is currently pending admin review. Please wait for review completion.",
+        detail: "Your KYC verification has already been submitted and is currently pending review. Submitted ID number and address data are locked and immutable while under review.",
       });
     }
 
@@ -3625,69 +3684,95 @@ api.post(
       });
     }
 
-    // 3. Validate & Sanitize ID Number Format (Anti-XSS & Anti-SQL/Command Injection)
+    // 3. Validate & Sanitize Mandatory ID Number Format (Anti-XSS & Anti-SQL/Command Injection)
+    if (!id_number || typeof id_number !== "string" || !id_number.trim()) {
+      return res.status(400).json({
+        error: "validation_error",
+        field: "id_number",
+        detail: "ID document number is mandatory and must be provided before submission.",
+      });
+    }
+
     let sanitizedIdNumber = "";
     let maskedIdNumber = "";
-    if (typeof id_number === "string" && id_number.trim().length > 0) {
-      const rawNum = id_number.trim();
+    const rawNum = id_number.trim();
 
-      // Check for dangerous injection characters or script tags
-      if (/[<>"'`\\;\(\)\{\}\[\]]/.test(rawNum) || /javascript:/i.test(rawNum) || /--/i.test(rawNum)) {
+    // Check for dangerous injection characters or script tags
+    if (/[<>"'`\\;\(\)\{\}\[\]]/.test(rawNum) || /javascript:/i.test(rawNum) || /--/i.test(rawNum)) {
+      return res.status(400).json({
+        error: "validation_error",
+        field: "id_number",
+        detail: "ID document number contains prohibited or dangerous characters.",
+      });
+    }
+
+    if (normalizedIdType === "aadhaar") {
+      const digitsOnly = rawNum.replace(/[\s-]/g, "");
+      if (!/^\d{12}$/.test(digitsOnly)) {
         return res.status(400).json({
           error: "validation_error",
           field: "id_number",
-          detail: "ID document number contains prohibited or dangerous characters.",
+          detail: "Aadhaar number must contain exactly 12 digits (e.g. 1234 5678 9012).",
         });
       }
-
-      if (normalizedIdType === "aadhaar") {
-        const digitsOnly = rawNum.replace(/[\s-]/g, "");
-        if (!/^\d{12}$/.test(digitsOnly)) {
-          return res.status(400).json({
-            error: "validation_error",
-            field: "id_number",
-            detail: "Aadhaar number must contain exactly 12 digits (e.g. 1234 5678 9012).",
-          });
-        }
-        if (/^(\d)\1{11}$/.test(digitsOnly)) {
-          return res.status(400).json({
-            error: "validation_error",
-            field: "id_number",
-            detail: "Invalid Aadhaar number: repetitive test digits are not allowed.",
-          });
-        }
-        sanitizedIdNumber = digitsOnly;
-        maskedIdNumber = `XXXX-XXXX-${digitsOnly.slice(-4)}`;
-      } else if (normalizedIdType === "passport") {
-        const cleanPassport = rawNum.replace(/[\s-]/g, "").toUpperCase();
-        if (!/^[A-Z0-9]{6,9}$/.test(cleanPassport)) {
-          return res.status(400).json({
-            error: "validation_error",
-            field: "id_number",
-            detail: "Passport number must be 6 to 9 alphanumeric characters (e.g. A1234567).",
-          });
-        }
-        sanitizedIdNumber = cleanPassport;
-        maskedIdNumber = `${cleanPassport.slice(0, 2)}••••${cleanPassport.slice(-3)}`;
-      } else {
-        if (rawNum.length < 4 || rawNum.length > 32) {
-          return res.status(400).json({
-            error: "validation_error",
-            field: "id_number",
-            detail: "ID document number must be between 4 and 32 characters in length.",
-          });
-        }
-        if (!/^[a-zA-Z0-9\s\-/_.]+$/.test(rawNum)) {
-          return res.status(400).json({
-            error: "validation_error",
-            field: "id_number",
-            detail: "ID document number contains invalid characters. Only alphanumeric, space, hyphens, and slashes are allowed.",
-          });
-        }
-        sanitizedIdNumber = sanitizePlainText(rawNum, 32);
-        maskedIdNumber = sanitizedIdNumber.length > 4 ? `••••${sanitizedIdNumber.slice(-4)}` : sanitizedIdNumber;
+      if (/^(\d)\1{11}$/.test(digitsOnly)) {
+        return res.status(400).json({
+          error: "validation_error",
+          field: "id_number",
+          detail: "Invalid Aadhaar number: repetitive test digits are not allowed.",
+        });
       }
+      sanitizedIdNumber = digitsOnly;
+      maskedIdNumber = `XXXX-XXXX-${digitsOnly.slice(-4)}`;
+    } else if (normalizedIdType === "passport") {
+      const cleanPassport = rawNum.replace(/[\s-]/g, "").toUpperCase();
+      if (!/^[A-Z0-9]{6,9}$/.test(cleanPassport)) {
+        return res.status(400).json({
+          error: "validation_error",
+          field: "id_number",
+          detail: "Passport number must be 6 to 9 alphanumeric characters (e.g. A1234567).",
+        });
+      }
+      sanitizedIdNumber = cleanPassport;
+      maskedIdNumber = `${cleanPassport.slice(0, 2)}••••${cleanPassport.slice(-3)}`;
+    } else {
+      if (rawNum.length < 4 || rawNum.length > 32) {
+        return res.status(400).json({
+          error: "validation_error",
+          field: "id_number",
+          detail: "ID document number must be between 4 and 32 characters in length.",
+        });
+      }
+      if (!/^[a-zA-Z0-9\s\-/_.]+$/.test(rawNum)) {
+        return res.status(400).json({
+          error: "validation_error",
+          field: "id_number",
+          detail: "ID document number contains invalid characters. Only alphanumeric, space, hyphens, and slashes are allowed.",
+        });
+      }
+      sanitizedIdNumber = sanitizePlainText(rawNum, 32);
+      maskedIdNumber = sanitizedIdNumber.length > 4 ? `••••${sanitizedIdNumber.slice(-4)}` : sanitizedIdNumber;
     }
+
+    // 4. Validate Mandatory Permanent Residential Address Input
+    const rawAddressInput = typeof address === "string" && address.trim() ? address : (typeof permanent_address === "string" ? permanent_address : "");
+    if (!rawAddressInput || !rawAddressInput.trim() || rawAddressInput.trim().length < 5) {
+      return res.status(400).json({
+        error: "validation_error",
+        field: "address",
+        detail: "Permanent residential address is mandatory and must be at least 5 characters in length.",
+      });
+    }
+
+    const rawAddress = rawAddressInput.trim();
+    if (/[<>]/.test(rawAddress) || /javascript:/i.test(rawAddress)) {
+      return res.status(400).json({
+        error: "validation_error",
+        field: "address",
+        detail: "Residential address contains prohibited or dangerous characters.",
+      });
+    }
+    const sanitizedAddress = sanitizePlainText(rawAddress, 500);
 
     // 4. Validate Uploaded Document Files (MIME, Size, Buffer integrity, Anti-polyglot magic bytes)
     const ALLOWED_DOC_MIMES = [
@@ -3793,8 +3878,11 @@ api.post(
       user_id: user.id,
       status: "pending",
       id_type: normalizedIdType,
-      id_number_encrypted: sanitizedIdNumber ? "encrypted" : null,
-      id_number_masked: maskedIdNumber || null,
+      id_number: sanitizedIdNumber,
+      id_number_encrypted: "encrypted",
+      id_number_masked: maskedIdNumber || sanitizedIdNumber,
+      address: sanitizedAddress,
+      permanent_address: sanitizedAddress,
       reject_reason: null,
       admin_id: null,
       liveness_metadata: livenessMeta,
@@ -3805,6 +3893,19 @@ api.post(
     };
     db.kyc_records.set(user.id, record);
     user.kyc_status = "pending";
+    user.id_type = normalizedIdType;
+    user.id_number_masked = maskedIdNumber || sanitizedIdNumber;
+    if (sanitizedAddress) {
+      user.address = sanitizedAddress;
+      user.permanent_address = sanitizedAddress;
+    }
+
+    // Clean up any old KYC documents for this user before storing freshly uploaded documents
+    for (const [docKey, existingDoc] of Array.from(db.kyc_documents.entries())) {
+      if (existingDoc.user_id === user.id) {
+        db.kyc_documents.delete(docKey);
+      }
+    }
 
     const createdDocs: any[] = [];
 
@@ -3885,11 +3986,16 @@ api.post(
     // Stop incomplete KYC reminder workflow
     reminderEngine.handleUserActionCompleted(user.id, "kyc");
 
+    saveDatabase();
+
     res.json({
       status: "pending",
       id_type: record.id_type,
-      id_number_present: Boolean(record.id_number_encrypted),
-      id_number_masked: record.id_number_masked,
+      id_number: record.id_number || record.id_number_masked || null,
+      id_number_masked: record.id_number_masked || null,
+      id_number_present: Boolean(record.id_number || record.id_number_encrypted),
+      address: record.address || record.permanent_address || null,
+      permanent_address: record.permanent_address || record.address || null,
       reject_reason: null,
       liveness: record.liveness_metadata,
       submitted_at: ts,
@@ -3940,7 +4046,12 @@ function getValidImageOrSvgDoc(doc: any, docLabel?: string): { buffer: Buffer; c
 
   // Generate crisp vector fallback SVG so images are always visually rich and never broken
   const isSelfie = doc?.doc_type === "selfie" || (docLabel && docLabel.toLowerCase().includes("selfie"));
-  const title = isSelfie ? "Live Camera Selfie" : doc?.doc_type === "id_back" ? "ID Document (Back)" : "ID Document (Front)";
+  const isAddressProof = doc?.doc_type === "id_back" || doc?.doc_type === "address_proof" || (docLabel && docLabel.toLowerCase().includes("address"));
+  const title = isSelfie
+    ? "Live Camera Selfie"
+    : isAddressProof
+    ? "Permanent Address Proof (ID Back)"
+    : "ID Document (Front)";
   const docIdShort = (doc?.id || "DOC").substring(0, 8).toUpperCase();
   const dateStr = doc?.created_at ? new Date(doc.created_at).toLocaleDateString() : "Verified Record";
 
@@ -3971,6 +4082,19 @@ function getValidImageOrSvgDoc(doc: any, docLabel?: string): { buffer: Buffer; c
   <text x="240" y="230" font-family="system-ui, sans-serif" font-size="14" fill="#94a3b8">Submitted: ${dateStr}</text>
   <rect x="240" y="250" width="160" height="30" rx="6" fill="#10b981" fill-opacity="0.2" stroke="#10b981" stroke-width="1"/>
   <text x="320" y="270" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="bold" fill="#34d399">LIVENESS VERIFIED</text>`
+      : isAddressProof
+      ? `<rect x="50" y="120" width="160" height="200" rx="10" fill="#2d2254" stroke="#a855f7" stroke-width="2"/>
+  <path d="M130 155 L90 190 L170 190 Z" fill="#c084fc"/>
+  <rect x="105" y="190" width="50" height="40" rx="2" fill="#c084fc" fill-opacity="0.8"/>
+  <rect x="120" y="205" width="20" height="25" fill="#2d2254"/>
+  <rect x="75" y="245" width="110" height="8" rx="3" fill="#a855f7" fill-opacity="0.7"/>
+  <rect x="75" y="260" width="110" height="8" rx="3" fill="#64748b"/>
+  <rect x="75" y="275" width="90" height="8" rx="3" fill="#64748b" fill-opacity="0.6"/>
+  <text x="240" y="165" font-family="system-ui, sans-serif" font-size="18" font-weight="bold" fill="#ffffff">Permanent Address Proof</text>
+  <text x="240" y="195" font-family="system-ui, sans-serif" font-size="14" fill="#94a3b8">Official Residential Proof (Aadhaar / ID Back)</text>
+  <text x="240" y="220" font-family="system-ui, sans-serif" font-size="14" fill="#94a3b8">Date: ${dateStr}</text>
+  <rect x="240" y="245" width="210" height="30" rx="6" fill="#a855f7" fill-opacity="0.2" stroke="#a855f7" stroke-width="1"/>
+  <text x="345" y="265" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="bold" fill="#e9d5ff">RESIDENTIAL ADDRESS PROOF</text>`
       : `<rect x="50" y="120" width="160" height="200" rx="10" fill="#2d2254" stroke="#8b5cf6" stroke-width="2"/>
   <circle cx="130" cy="180" r="30" fill="#a78bfa" fill-opacity="0.7"/>
   <rect x="75" y="230" width="110" height="10" rx="4" fill="#64748b"/>
@@ -5642,10 +5766,14 @@ api.get("/admin/kyc", adminMiddleware, (req, res) => {
         user_id: k.user_id,
         user_name: u?.name || null,
         user_email: u?.email || null,
+        user_phone: u?.phone || null,
         status: k.status,
         id_type: k.id_type,
-        id_number_present: Boolean(k.id_number_encrypted),
+        id_number: k.id_number || k.id_number_masked || null,
         id_number_masked: k.id_number_masked || null,
+        id_number_present: Boolean(k.id_number || k.id_number_encrypted),
+        address: k.address || k.permanent_address || u?.address || null,
+        permanent_address: k.permanent_address || k.address || u?.permanent_address || u?.address || null,
         liveness: k.liveness_metadata || null,
         reject_reason: k.reject_reason,
         submitted_at: k.submitted_at,
@@ -5675,6 +5803,8 @@ api.post("/admin/kyc/:id/approve", adminMiddleware, (req, res) => {
 
   const user = db.users.get(record.user_id);
   if (user) user.kyc_status = "approved";
+
+  saveDatabase();
 
   logAudit("kyc.approve", admin, "kyc_record", record.id);
   createNotification(
@@ -5711,6 +5841,8 @@ api.post("/admin/kyc/:id/reject", adminMiddleware, (req, res) => {
   const user = db.users.get(record.user_id);
   if (user) user.kyc_status = "rejected";
 
+  saveDatabase();
+
   logAudit("kyc.reject", admin, "kyc_record", record.id, { reason });
   createNotification(
     record.user_id,
@@ -5721,6 +5853,201 @@ api.post("/admin/kyc/:id/reject", adminMiddleware, (req, res) => {
   );
 
   res.json({ ok: true, status: "rejected" });
+});
+
+// Admin Update KYC Details (ID Type, ID Number, Address, User Name, Status, Note)
+api.put("/admin/kyc/:id", adminMiddleware, (req, res) => {
+  const admin = (req as any).user;
+  let record: any = null;
+  // Can match by kyc record id or by user_id
+  for (const k of db.kyc_records.values()) {
+    if (k.id === req.params.id || k.user_id === req.params.id) {
+      record = k;
+      break;
+    }
+  }
+
+  const { name, id_type, id_number, address, permanent_address, status, admin_note } = req.body || {};
+
+  let user = record ? db.users.get(record.user_id) : db.users.get(req.params.id);
+  if (!user && !record) {
+    return res.status(404).json({ detail: "User or KYC record not found." });
+  }
+
+  // If no KYC record exists for user yet, create one
+  if (!record && user) {
+    const recId = genId();
+    record = {
+      id: recId,
+      user_id: user.id,
+      id_type: id_type ? sanitizePlainText(id_type).toLowerCase() : "aadhaar",
+      status: status || "approved",
+      submitted_at: nowIso(),
+      created_at: nowIso(),
+    };
+    db.kyc_records.set(user.id, record);
+  }
+
+  const ts = nowIso();
+  const changes: Record<string, any> = {};
+
+  // 1. Update user full legal name if specified
+  if (typeof name === "string" && name.trim()) {
+    const cleanName = sanitizePlainText(name.trim(), 100);
+    if (user && cleanName && cleanName !== user.name) {
+      changes.name = { old: user.name, new: cleanName };
+      user.name = cleanName;
+    }
+  }
+
+  // 2. Update ID document type
+  if (typeof id_type === "string" && id_type.trim()) {
+    const cleanType = sanitizePlainText(id_type.trim().toLowerCase(), 50);
+    if (cleanType !== record.id_type) {
+      changes.id_type = { old: record.id_type, new: cleanType };
+      record.id_type = cleanType;
+    }
+  }
+
+  // 3. Update ID number
+  if (typeof id_number === "string" && id_number.trim()) {
+    const cleanNum = sanitizePlainText(id_number.trim(), 64);
+    changes.id_number = { old: record.id_number_masked || record.id_number, new: cleanNum };
+    record.id_number = cleanNum;
+    if (record.id_type === "aadhaar") {
+      const digits = cleanNum.replace(/[\s-]/g, "");
+      record.id_number_masked = digits.length >= 4 ? `XXXX-XXXX-${digits.slice(-4)}` : cleanNum;
+    } else {
+      record.id_number_masked = cleanNum.length > 4 ? `${cleanNum.slice(0, 2)}***${cleanNum.slice(-2)}` : cleanNum;
+    }
+    record.id_number_encrypted = Buffer.from(cleanNum).toString("base64");
+    if (user) user.id_number = cleanNum;
+  }
+
+  // 4. Update permanent residential address
+  const targetAddress = permanent_address || address;
+  if (typeof targetAddress === "string" && targetAddress.trim()) {
+    const cleanAddr = sanitizePlainText(targetAddress.trim(), 500);
+    changes.address = { old: record.permanent_address || record.address, new: cleanAddr };
+    record.address = cleanAddr;
+    record.permanent_address = cleanAddr;
+    if (user) {
+      user.address = cleanAddr;
+      user.permanent_address = cleanAddr;
+    }
+  }
+
+  // 5. Update Status
+  if (typeof status === "string" && ["approved", "pending", "rejected", "none"].includes(status)) {
+    if (status !== record.status) {
+      changes.status = { old: record.status, new: status };
+      record.status = status;
+      if (user) user.kyc_status = status;
+      if (status === "approved") {
+        record.reviewed_at = ts;
+      }
+    }
+  }
+
+  const cleanNote = typeof admin_note === "string" ? sanitizePlainText(admin_note.trim(), 500) : "";
+  record.admin_note = cleanNote || record.admin_note || null;
+  record.admin_id = admin.id;
+  record.updated_at = ts;
+
+  saveDatabase();
+
+  logAudit("kyc.admin_update", admin, "kyc_record", record.id, { changes, note: cleanNote });
+  if (user) {
+    createNotification(
+      user.id,
+      "kyc_updated",
+      "KYC Verification Updated",
+      cleanNote
+        ? `Your identity verification details were updated by admin: ${cleanNote}`
+        : "Your verified KYC identity details have been updated by administration.",
+      `kyc_update:${record.id}`
+    );
+  }
+
+  res.json({
+    ok: true,
+    record: {
+      ...record,
+      user_name: user?.name || null,
+      user_email: user?.email || null,
+    },
+    user: user ? cleanUser(user) : null,
+    changes,
+  });
+});
+
+// Admin Unlock KYC for User Resubmission
+api.post("/admin/kyc/:id/unlock", adminMiddleware, (req, res) => {
+  const admin = (req as any).user;
+  let record: any = null;
+  for (const k of db.kyc_records.values()) {
+    if (k.id === req.params.id || k.user_id === req.params.id) {
+      record = k;
+      break;
+    }
+  }
+
+  let user = record ? db.users.get(record.user_id) : db.users.get(req.params.id);
+  if (!user && !record) {
+    return res.status(404).json({ detail: "KYC record or user not found" });
+  }
+
+  const reason = sanitizePlainText(req.body.reason || "Unlocked by administrator upon user support request to allow re-submission.", 500);
+  const ts = nowIso();
+
+  if (record) {
+    record.status = "rejected";
+    record.reject_reason = reason;
+    record.admin_id = admin.id;
+    record.updated_at = ts;
+  }
+  if (user) {
+    user.kyc_status = "rejected";
+  }
+
+  saveDatabase();
+
+  logAudit("kyc.unlock", admin, "kyc_record", record?.id || user?.id, { reason });
+  if (user) {
+    createNotification(
+      user.id,
+      "kyc_unlocked",
+      "KYC Unlocked for Re-submission",
+      `Your KYC verification has been unlocked by admin: ${reason}. You can now edit all details and submit updated documents on the KYC page.`,
+      `kyc_unlocked:${record?.id || user.id}`
+    );
+  }
+
+  res.json({ ok: true, status: "rejected", message: "KYC unlocked for user resubmission" });
+});
+
+// Admin Direct Route for User KYC update by user ID
+api.put("/admin/users/:userId/kyc", adminMiddleware, (req, res) => {
+  req.params.id = req.params.userId;
+  // Route to kyc handler directly
+  let record: any = null;
+  for (const k of db.kyc_records.values()) {
+    if (k.user_id === req.params.userId || k.id === req.params.userId) {
+      record = k;
+      break;
+    }
+  }
+  if (record) {
+    req.params.id = record.id;
+  }
+  const handler = (api as any)._router?.stack?.find((layer: any) => layer.route?.path === "/admin/kyc/:id" && layer.route?.methods?.put);
+  if (handler) {
+    return handler.handle(req, res);
+  }
+  // Fallback direct execution
+  const user = db.users.get(req.params.userId);
+  if (!user) return res.status(404).json({ detail: "User not found" });
+  res.json({ ok: true, user: cleanUser(user) });
 });
 
 api.post("/admin/kyc/batch-approve", adminMiddleware, (req, res) => {
@@ -5767,6 +6094,8 @@ api.post("/admin/kyc/batch-approve", adminMiddleware, (req, res) => {
 
     approved.push({ id: record.id, user_id: record.user_id });
   }
+
+  saveDatabase();
 
   res.json({ success: true, count: approved.length, approved, errors });
 });
@@ -5817,6 +6146,8 @@ api.post("/admin/kyc/batch-reject", adminMiddleware, (req, res) => {
 
     rejected.push({ id: record.id, user_id: record.user_id });
   }
+
+  saveDatabase();
 
   res.json({ success: true, count: rejected.length, rejected, errors });
 });
@@ -5899,6 +6230,8 @@ api.post("/admin/kyc/batch-set-status", adminMiddleware, (req, res) => {
 
     updated.push({ id: record.id, user_id: record.user_id, status: record.status });
   }
+
+  saveDatabase();
 
   res.json({ success: true, count: updated.length, status, updated, errors });
 });
@@ -6774,6 +7107,7 @@ api.get("/admin/reports/:dataset", adminMiddleware, (req, res) => {
         last_name: k.last_name || "",
         country: k.country || "IN",
         id_number_masked: maskedId,
+        address: k.address || "—",
         rejection_reason: k.rejection_reason || "—",
         submitted_at: k.submitted_at || k.created_at || "—",
         reviewed_at: k.reviewed_at || "—",

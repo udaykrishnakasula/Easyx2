@@ -41,6 +41,7 @@ import {
   Timer,
   CheckCheck,
   BarChart3,
+  Edit3,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -60,6 +61,7 @@ import AdminSupportSlaModal from "@/admin/components/AdminSupportSlaModal";
 import AdminTicketTimelineView from "@/admin/components/AdminTicketTimelineView";
 import AdminTicketEscalateModal from "@/admin/components/AdminTicketEscalateModal";
 import AdminSupportAnalyticsDashboard from "@/admin/components/AdminSupportAnalyticsDashboard";
+import AdminEditKycModal from "@/admin/components/AdminEditKycModal";
 import {
   PageHeading,
   EasyXCard,
@@ -857,6 +859,7 @@ function AdminTicketDetailWorkspace({ ticketId, adminUsers, onClose }) {
   const [internalNote, setInternalNote] = useState("");
   const [statusChangeModalOpen, setStatusChangeModalOpen] = useState(false);
   const [escalateModalOpen, setEscalateModalOpen] = useState(false);
+  const [editKycModalOpen, setEditKycModalOpen] = useState(false);
   const [targetStatus, setTargetStatus] = useState("RESOLVED");
   const [statusReason, setStatusReason] = useState("");
 
@@ -1144,6 +1147,18 @@ function AdminTicketDetailWorkspace({ ticketId, adminUsers, onClose }) {
               >
                 KYC: {user?.kyc_status?.toUpperCase() || "NONE"}
               </span>
+
+              {user && (
+                <button
+                  type="button"
+                  onClick={() => setEditKycModalOpen(true)}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 transition"
+                  title="Edit or Unlock KYC Details for this user"
+                  data-testid="ticket-edit-kyc-btn"
+                >
+                  <Edit3 className="h-3 w-3" /> Edit KYC
+                </button>
+              )}
             </div>
           </div>
 
@@ -1507,6 +1522,16 @@ function AdminTicketDetailWorkspace({ ticketId, adminUsers, onClose }) {
         onOpenChange={setEscalateModalOpen}
         ticket={ticket}
         onSuccess={() => refetch()}
+      />
+
+      {/* Admin Edit / Unlock KYC Modal for ticket user */}
+      <AdminEditKycModal
+        open={editKycModalOpen}
+        user={user}
+        onClose={() => setEditKycModalOpen(false)}
+        onSaved={() => {
+          refetch();
+        }}
       />
     </div>
   );

@@ -38,6 +38,9 @@ import {
   Search,
   Filter,
   Download,
+  MapPin,
+  X,
+  Edit3,
 } from "lucide-react";
 import { toast } from "sonner";
 import dayjs from "dayjs";
@@ -70,6 +73,7 @@ import {
   useAdminAuditLogs,
 } from "@/admin/adminApi";
 import { apiError } from "@/shared/lib/api";
+import AdminEditKycModal from "@/admin/components/AdminEditKycModal";
 import {
   EasyXModal,
   EasyXButton,
@@ -226,6 +230,7 @@ export function User360ViewModal({ user: initialUser, open, onClose, onUserUpdat
 
   const [kycRejectModalOpen, setKycRejectModalOpen] = useState(false);
   const [kycRejectReason, setKycRejectReason] = useState("");
+  const [editKycModalOpen, setEditKycModalOpen] = useState(false);
 
   const [cancelInvModalOpen, setCancelInvModalOpen] = useState(null); // investment object
   const [cancelInvReason, setCancelInvReason] = useState("");
@@ -937,6 +942,21 @@ export function User360ViewModal({ user: initialUser, open, onClose, onUserUpdat
                   <span className="text-ex-muted">Total Affiliate Referees</span>
                   <p className="mt-1 text-ex-text font-bold">{user.referrals?.total_referred || 0} members</p>
                 </div>
+
+                <div>
+                  <span className="text-ex-muted">Verified ID Number</span>
+                  <p className="mt-1 font-mono text-emerald-400 font-semibold">
+                    {userKyc?.id_number || userKyc?.id_number_masked || user?.id_number || (user.kyc_status === "approved" || user.kyc_status === "pending" ? "Encrypted on file" : "Not submitted")}
+                  </p>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <span className="text-ex-muted">Permanent Address</span>
+                  <p className="mt-1 text-ex-text font-medium flex items-start gap-1">
+                    <MapPin className="h-3.5 w-3.5 text-purple-400 shrink-0 mt-0.5" />
+                    <span>{userKyc?.permanent_address || userKyc?.address || user?.permanent_address || user?.address || "Not submitted yet"}</span>
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -963,33 +983,54 @@ export function User360ViewModal({ user: initialUser, open, onClose, onUserUpdat
                       <KycPill status={userKyc?.status || user.kyc_status} />
                     </div>
                     <p className="text-xs text-ex-muted">
-                      ID Type: <strong>{(userKyc?.id_type || "National ID").toUpperCase()}</strong> · Masked ID:{" "}
-                      <span className="font-mono text-ex-text">{userKyc?.id_number_masked || "Encrypted on file"}</span>
+                      ID Type: <strong>{(userKyc?.id_type || "National ID").toUpperCase()}</strong> · ID Number:{" "}
+                      <span className="font-mono text-emerald-400 font-medium">{userKyc?.id_number || userKyc?.id_number_masked || "Encrypted on file"}</span>
                     </p>
+                    {(userKyc?.permanent_address || userKyc?.address || user?.permanent_address || user?.address) && (
+                      <p className="text-xs text-ex-text/90 flex items-start gap-1 pt-0.5">
+                        <MapPin className="h-3.5 w-3.5 text-purple-400 shrink-0 mt-0.5" />
+                        <span>
+                          <span className="text-ex-muted">Permanent Address:</span>{" "}
+                          <span className="text-white font-medium">
+                            {userKyc?.permanent_address || userKyc?.address || user?.permanent_address || user?.address}
+                          </span>
+                        </span>
+                      </p>
+                    )}
                     {userKyc?.submitted_at && (
                       <p className="text-[11px] text-ex-muted">Submitted on {formatDate(userKyc.submitted_at)}</p>
                     )}
                   </div>
 
-                  {/* KYC In-Line Review Actions */}
-                  {userKyc?.status === "pending" && (
-                    <div className="flex items-center gap-2">
-                      <EasyXButton
-                        onClick={() => handleApproveKyc(userKyc.id)}
-                        loading={approveKycMutation.isPending}
-                        className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs h-9 px-4"
-                      >
-                        <Check className="h-3.5 w-3.5 mr-1" /> Approve KYC
-                      </EasyXButton>
+                  {/* KYC In-Line Review & Modification Actions */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {userKyc?.status === "pending" && (
+                      <>
+                        <EasyXButton
+                          onClick={() => handleApproveKyc(userKyc.id)}
+                          loading={approveKycMutation.isPending}
+                          className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs h-9 px-4"
+                        >
+                          <Check className="h-3.5 w-3.5 mr-1" /> Approve KYC
+                        </EasyXButton>
 
-                      <EasyXButton
-                        onClick={() => setKycRejectModalOpen(true)}
-                        className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 font-semibold text-xs h-9 px-4"
-                      >
-                        <X className="h-3.5 w-3.5 mr-1" /> Reject KYC
-                      </EasyXButton>
-                    </div>
-                  )}
+                        <EasyXButton
+                          onClick={() => setKycRejectModalOpen(true)}
+                          className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 font-semibold text-xs h-9 px-4"
+                        >
+                          <X className="h-3.5 w-3.5 mr-1" /> Reject KYC
+                        </EasyXButton>
+                      </>
+                    )}
+
+                    <EasyXButton
+                      onClick={() => setEditKycModalOpen(true)}
+                      className="bg-purple-600/20 hover:bg-purple-600/30 text-purple-200 border border-purple-500/30 font-semibold text-xs h-9 px-4"
+                      data-testid="user360-edit-kyc-btn"
+                    >
+                      <Edit3 className="h-3.5 w-3.5 mr-1" /> Edit KYC Details
+                    </EasyXButton>
+                  </div>
                 </div>
 
                 {/* Rejection notice if rejected */}
@@ -1765,6 +1806,17 @@ export function User360ViewModal({ user: initialUser, open, onClose, onUserUpdat
         onClose={() => setZoomModal({ open: false, url: null, title: "" })}
         imageUrl={zoomModal.url}
         title={zoomModal.title}
+      />
+
+      {/* 7. ADMIN EDIT KYC DETAILS MODAL */}
+      <AdminEditKycModal
+        open={editKycModalOpen}
+        record={userKyc}
+        user={user}
+        onClose={() => setEditKycModalOpen(false)}
+        onSaved={() => {
+          if (onUserUpdated) onUserUpdated();
+        }}
       />
     </EasyXModal>
   );

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Wallet, PiggyBank, ArrowDownToLine, ArrowUpFromLine,
   Users, ShieldCheck, Bell, ReceiptText, User, Lock, LogOut, Menu,
@@ -71,6 +72,7 @@ function Brand() {
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [openMobile, setOpenMobile] = useState(false);
   const { data: unreadCount = 0 } = useUnreadCount();
   useRealtimeNotifications();
@@ -99,7 +101,7 @@ export default function DashboardLayout() {
       <aside className="hidden lg:flex fixed inset-y-0 left-0 z-20 w-64 flex-col border-r border-white/8 bg-ex-surface2 p-4">
         <Brand />
         <div className="mt-7 flex-1 overflow-y-auto pr-1"><NavItems unreadCount={unreadCount} /></div>
-        <button onClick={handleLogout} className="ex-btn ex-btn-ghost mt-4 h-11 w-full" data-testid="logout-button">
+        <button onClick={handleLogout} className="ex-btn ex-btn-ghost mt-4 h-11 w-full active:scale-98" data-testid="logout-button">
           <LogOut className="mr-2 h-4 w-4" /> Logout
         </button>
       </aside>
@@ -108,7 +110,7 @@ export default function DashboardLayout() {
       <header className="lg:hidden sticky top-0 z-30 flex items-center justify-between border-b border-white/8 bg-ex-ink/90 backdrop-blur-xl px-4 py-3">
         <Sheet open={openMobile} onOpenChange={setOpenMobile}>
           <SheetTrigger asChild>
-            <button className="grid h-10 w-10 place-items-center rounded-ex-ctrl text-ex-text hover:bg-white/10" data-testid="mobile-nav-trigger">
+            <button className="grid h-10 w-10 place-items-center rounded-ex-ctrl text-ex-text hover:bg-white/10 active:scale-95" data-testid="mobile-nav-trigger">
               <Menu className="h-5 w-5" />
             </button>
           </SheetTrigger>
@@ -116,7 +118,7 @@ export default function DashboardLayout() {
             <SheetTitle className="sr-only">EasyX navigation</SheetTitle>
             <Brand />
             <div className="mt-7"><NavItems onNavigate={() => setOpenMobile(false)} unreadCount={unreadCount} /></div>
-            <button onClick={handleLogout} className="ex-btn ex-btn-ghost mt-4 h-11 w-full">
+            <button onClick={handleLogout} className="ex-btn ex-btn-ghost mt-4 h-11 w-full active:scale-98">
               <LogOut className="mr-2 h-4 w-4" /> Logout
             </button>
           </SheetContent>
@@ -135,7 +137,17 @@ export default function DashboardLayout() {
           <UserProfileMenu />
         </div>
         <div className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-9">
-          <Outlet />
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
         </div>
       </main>
     </div>

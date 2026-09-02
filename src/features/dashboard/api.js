@@ -189,22 +189,27 @@ export function useKyc() {
 export function useSubmitKyc() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ idType, idNumber, idDocument, idFrontDocument, idBackDocument, selfie, livenessSessionId }) => {
+    mutationFn: async ({ idType, idNumber, address, idDocument, idFrontDocument, idBackDocument, selfie, livenessSessionId }) => {
       const form = new FormData();
       form.append("id_type", idType);
-      if (idNumber) form.append("id_number", idNumber);
-      if (idFrontDocument) form.append("id_front_document", idFrontDocument);
-      if (idBackDocument) form.append("id_back_document", idBackDocument);
-      if (idDocument) form.append("id_document", idDocument);
-      if (selfie) form.append("selfie", selfie);
-      if (livenessSessionId) form.append("liveness_session_id", livenessSessionId);
-      const res = await api.post("/kyc/submit", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      if (idNumber) form.append("id_number", String(idNumber).trim());
+      if (address) {
+        const cleanAddress = String(address).trim();
+        form.append("address", cleanAddress);
+        form.append("permanent_address", cleanAddress);
+      }
+      if (idFrontDocument) form.append("id_front_document", idFrontDocument, idFrontDocument.name || "id_front.jpg");
+      if (idBackDocument) form.append("id_back_document", idBackDocument, idBackDocument.name || "id_back.jpg");
+      if (idDocument) form.append("id_document", idDocument, idDocument.name || "id_document.jpg");
+      if (selfie) form.append("selfie", selfie, selfie.name || "selfie.jpg");
+      if (livenessSessionId) form.append("liveness_session_id", String(livenessSessionId).trim());
+      const res = await api.post("/kyc/submit", form);
       return res.data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["kyc"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["profile"] });
     },
   });
 }

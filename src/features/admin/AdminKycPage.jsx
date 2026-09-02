@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { BadgeCheck, FileImage, Check, X, ZoomIn } from "lucide-react";
+import { BadgeCheck, FileImage, Check, X, ZoomIn, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import dayjs from "dayjs";
 
@@ -121,11 +121,21 @@ function KycRow({ rec, onZoom }) {
         <div>
           <div className="text-sm font-semibold text-ex-text">{rec.user_name || "User"}</div>
           <div className="text-[11px] text-ex-muted">{rec.user_email}</div>
-          <div className="mt-1 text-[11px] text-ex-muted">
-            ID type: <span className="capitalize text-ex-text">{rec.id_type || "—"}</span>
-            {rec.id_number_present && <span className="ml-2 text-emerald-300">· ID number on file (encrypted)</span>}
+          <div className="mt-1 text-[11px] text-ex-muted flex flex-wrap items-center gap-x-2">
+            <span>ID type: <span className="capitalize text-ex-text font-medium">{rec.id_type || "—"}</span></span>
+            {(rec.id_number || rec.id_number_masked) ? (
+              <span className="text-emerald-400 font-mono font-medium">· ID: {rec.id_number || rec.id_number_masked}</span>
+            ) : rec.id_number_present ? (
+              <span className="text-emerald-300">· ID on file (encrypted)</span>
+            ) : null}
           </div>
-          <div className="text-[11px] text-ex-muted">Submitted {rec.submitted_at ? dayjs(rec.submitted_at).format("DD MMM YYYY, HH:mm") : "—"}</div>
+          {(rec.permanent_address || rec.address) && (
+            <div className="mt-1 text-[11px] text-ex-text/90 flex items-start gap-1">
+              <MapPin className="h-3 w-3 text-purple-400 shrink-0 mt-0.5" />
+              <span><span className="text-ex-muted">Permanent Address:</span> <span className="text-white font-medium">{rec.permanent_address || rec.address}</span></span>
+            </div>
+          )}
+          <div className="text-[11px] text-ex-muted mt-0.5">Submitted {rec.submitted_at ? dayjs(rec.submitted_at).format("DD MMM YYYY, HH:mm") : "—"}</div>
         </div>
         <EasyXStatusBadge status={rec.status} />
       </div>

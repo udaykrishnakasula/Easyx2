@@ -213,6 +213,23 @@ export function AdminImageZoomModal({
           </div>
         </div>
 
+        {/* Inspection Details / Permanent Address Verification Banner */}
+        {details && details.length > 0 && (
+          <div className="px-5 py-2.5 bg-purple-950/40 border-b border-purple-500/20 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 min-w-0">
+              {details.map((item, idx) => (
+                <div key={idx} className="flex items-start sm:items-center gap-1.5">
+                  <span className="text-purple-300/80 font-medium shrink-0">{item.label}:</span>
+                  <span className="text-white font-semibold break-all sm:break-normal">{item.value}</span>
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] text-purple-300/70 font-mono shrink-0 hidden sm:block">
+              Verify Document vs Address Record
+            </div>
+          </div>
+        )}
+
         {/* Viewport canvas for interactive zooming and panning */}
         <div
           ref={containerRef}

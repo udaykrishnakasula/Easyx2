@@ -191,17 +191,17 @@ export default function DashboardPlanCarousel({ plans, walletBalance, userName }
                       <button
                         onClick={() => setBuyPlan(plan)}
                         data-testid={`dash-plan-unlock-${key}`}
-                        className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-[28px] bg-black/25 backdrop-blur-[3px] transition-colors duration-200 hover:bg-black/35"
+                        className="group/lock absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-[28px] bg-black/30 backdrop-blur-[3px] transition-all duration-300 hover:bg-black/40 hover:backdrop-blur-[2px]"
                       >
-                        <Lock className="h-12 w-12 text-yellow-400" strokeWidth={2.25} />
-                        <span className="ex-display text-base font-semibold text-white">Tap to unlock</span>
+                        <Lock className="h-12 w-12 text-yellow-400 transition-transform duration-300 group-hover/lock:scale-110 group-hover/lock:rotate-[-6deg]" strokeWidth={2.25} />
+                        <span className="ex-display text-base font-semibold text-white transition-transform duration-300 group-hover/lock:translate-y-[-2px]">Tap to unlock</span>
                         <span className="text-xs text-white/70">Invest to reveal this plan</span>
                       </button>
                     )}
                   </div>
 
                   {/* Real plan action bar */}
-                  <div className="mt-4 w-[420px] max-w-[82vw] ex-surface-sm p-3 flex items-center justify-between gap-3 transition-colors duration-200">
+                  <div className="mt-4 w-[420px] max-w-[82vw] ex-surface-sm p-3 flex items-center justify-between gap-3 transition-all duration-300 hover:border-white/20">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="ex-eyebrow truncate">{plan.name}</span>
                       <EasyXStatusBadge status={plan.unlocked ? "unlocked" : "locked"} />
@@ -211,12 +211,12 @@ export default function DashboardPlanCarousel({ plans, walletBalance, userName }
                     </div>
                     {plan.unlocked ? (
                       <div className="flex gap-2 shrink-0">
-                        <EasyXButton variant="ghost" className="h-9 px-3" onClick={() => setBuyPlan(plan)} data-testid={`dash-buymore-${key}`}>
+                        <EasyXButton variant="ghost" className="h-9 px-3 active:scale-95 transition-transform" onClick={() => setBuyPlan(plan)} data-testid={`dash-buymore-${key}`}>
                           BUY
                         </EasyXButton>
                       </div>
                     ) : (
-                      <EasyXButton className="h-9 px-4 shrink-0" onClick={() => setBuyPlan(plan)} data-testid={`dash-buy-${key}`}>
+                      <EasyXButton className="h-9 px-4 shrink-0 active:scale-95 transition-transform" onClick={() => setBuyPlan(plan)} data-testid={`dash-buy-${key}`}>
                         Buy {money(plan.price)}
                       </EasyXButton>
                     )}

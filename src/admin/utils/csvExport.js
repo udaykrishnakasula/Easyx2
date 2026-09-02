@@ -176,6 +176,11 @@ export const KYC_CSV_COLUMNS = [
     accessor: (row) => row.id_number || row.id_number_masked || "—",
   },
   {
+    key: "address",
+    label: "Permanent Residential Address",
+    accessor: (row) => row.permanent_address || row.address || row.user_address || row.user?.address || "—",
+  },
+  {
     key: "country",
     label: "Country",
     formatter: (v) => v || "IN",

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
   Wallet,
@@ -50,14 +51,14 @@ function NavItems({ onNavigate, unreadCount = 0, supportUnread = 0 }) {
           to={to}
           onClick={onNavigate}
           className={({ isActive }) =>
-            `flex items-center gap-3 rounded-ex-ctrl px-3 py-2.5 text-sm transition duration-300 ease-ex ${
+            `group relative flex items-center gap-3 rounded-ex-ctrl px-3 py-2.5 text-sm transition-all duration-300 ease-ex ${
               isActive
-                ? "bg-ex-accent text-ex-ink font-semibold shadow-ex-btn"
-                : "text-ex-muted hover:bg-white/8 hover:text-ex-text"
+                ? "bg-ex-accent text-ex-ink font-semibold shadow-ex-btn scale-[1.01]"
+                : "text-ex-muted hover:bg-white/8 hover:text-ex-text hover:translate-x-1"
             }`
           }
         >
-          <Icon className="h-4 w-4 shrink-0" />
+          <Icon className="h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110" />
           <span className="flex-1">{label}</span>
           {to === "/notifications" && unreadCount > 0 && (
             <span
@@ -83,7 +84,7 @@ function NavItems({ onNavigate, unreadCount = 0, supportUnread = 0 }) {
 
 function Brand() {
   return (
-    <div className="flex items-center gap-2 px-1">
+    <div className="flex items-center gap-2 px-1 transition-transform duration-300 hover:scale-[1.02]">
       <AppLogo showName size="md" />
     </div>
   );
@@ -92,6 +93,7 @@ function Brand() {
 export default function UserLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [openMobile, setOpenMobile] = useState(false);
   const { data: unreadCount = 0 } = useUnreadCount();
   const { data: supportTicketsData } = useSupportTickets();
@@ -115,7 +117,7 @@ export default function UserLayout() {
     <div className="ex-app-bg min-h-screen">
       {/* Ambient lavender glow */}
       <div
-        className="pointer-events-none fixed inset-0 z-0"
+        className="pointer-events-none fixed inset-0 z-0 transition-opacity duration-1000"
         style={{
           background:
             "radial-gradient(50% 40% at 85% 0%, rgba(150,128,220,0.12) 0%, rgba(12,12,15,0) 60%)",
@@ -130,7 +132,7 @@ export default function UserLayout() {
         </div>
         <button
           onClick={handleLogout}
-          className="ex-btn ex-btn-ghost mt-4 h-11 w-full"
+          className="ex-btn ex-btn-ghost mt-4 h-11 w-full transition-transform active:scale-98 hover:bg-white/10"
           data-testid="logout-button"
         >
           <LogOut className="mr-2 h-4 w-4" /> Logout
@@ -142,7 +144,7 @@ export default function UserLayout() {
         <Sheet open={openMobile} onOpenChange={setOpenMobile}>
           <SheetTrigger asChild>
             <button
-              className="grid h-10 w-10 place-items-center rounded-ex-ctrl text-ex-text hover:bg-white/10"
+              className="grid h-10 w-10 place-items-center rounded-ex-ctrl text-ex-text hover:bg-white/10 active:scale-95 transition-all"
               data-testid="mobile-nav-trigger"
             >
               <Menu className="h-5 w-5" />
@@ -158,7 +160,7 @@ export default function UserLayout() {
                 supportUnread={supportUnread}
               />
             </div>
-            <button onClick={handleLogout} className="ex-btn ex-btn-ghost mt-4 h-11 w-full">
+            <button onClick={handleLogout} className="ex-btn ex-btn-ghost mt-4 h-11 w-full active:scale-98">
               <LogOut className="mr-2 h-4 w-4" /> Logout
             </button>
           </SheetContent>
@@ -197,7 +199,17 @@ export default function UserLayout() {
         )}
 
         <div className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-9">
-          <Outlet />
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
         </div>
       </main>
     </div>

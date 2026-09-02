@@ -167,6 +167,35 @@ export function useRejectKyc() {
   });
 }
 
+export function useUpdateAdminKyc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...data }) => (await api.put(`/admin/kyc/${id}`, data)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-kyc"] });
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["admin-user"] });
+      qc.invalidateQueries({ queryKey: ["user-kyc"] });
+      qc.invalidateQueries({ queryKey: ["admin-support-tickets"] });
+      qc.invalidateQueries({ queryKey: ["support-tickets"] });
+    },
+  });
+}
+
+export function useUnlockKyc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }) => (await api.post(`/admin/kyc/${id}/unlock`, { reason })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-kyc"] });
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["admin-user"] });
+      qc.invalidateQueries({ queryKey: ["user-kyc"] });
+      qc.invalidateQueries({ queryKey: ["admin-support-tickets"] });
+    },
+  });
+}
+
 export function useBatchApproveKyc() {
   const qc = useQueryClient();
   return useMutation({

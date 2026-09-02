@@ -106,6 +106,16 @@ api.interceptors.request.use((config) => {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // If request data is FormData (multipart uploads), delete static Content-Type
+  // so Axios / Browser sets the correct multipart/form-data boundary header
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    if (config.headers) {
+      delete config.headers["Content-Type"];
+      delete config.headers["content-type"];
+    }
+  }
+
   return config;
 });
 
@@ -227,21 +237,22 @@ export const apiError = (error, fallback = "Something went wrong. Please try aga
   }
 
   // 8. Normal 4xx client errors (400, 401, 403, 404, 409, 422, 429)
-  const detail = error?.response?.data?.detail;
+  const data = error?.response?.data;
+  const detail = data?.detail || data?.message || (typeof data?.error === "string" && data.error !== "validation_error" ? data.error : null);
   if (typeof detail === "string") {
     if (isSensitiveErrorMessage(detail)) {
       return fallback;
     }
     return detail;
   }
-  if (detail && typeof detail === "object" && !Array.isArray(detail) && detail.message) {
-    if (typeof detail.message === "string" && !isSensitiveErrorMessage(detail.message)) {
-      return detail.message;
+  if (data?.detail && typeof data.detail === "object" && !Array.isArray(data.detail) && data.detail.message) {
+    if (typeof data.detail.message === "string" && !isSensitiveErrorMessage(data.detail.message)) {
+      return data.detail.message;
     }
     return fallback;
   }
-  if (Array.isArray(detail) && detail.length) {
-    const firstMsg = detail[0]?.msg;
+  if (Array.isArray(data?.detail) && data.detail.length) {
+    const firstMsg = data.detail[0]?.msg || data.detail[0]?.message;
     if (typeof firstMsg === "string" && !isSensitiveErrorMessage(firstMsg)) {
       return firstMsg;
     }
