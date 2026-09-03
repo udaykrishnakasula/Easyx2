@@ -8,7 +8,6 @@ import {
   Video,
   Info,
   ShieldAlert,
-  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EasyXButton } from "@/design/EasyX";
@@ -30,82 +29,6 @@ interface KycCameraCaptureProps {
   onReset: () => void;
   disabled?: boolean;
 }
-
-const SUPPORTED_MIME_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-const MAX_FILE_SIZE_MB = 10;
-
-/**
- * Resizes and converts an image file to a clean base64 data URL and Blob
- * Reused from the proven Deposit payment proof processor
- */
-const processImageFile = (file: File): Promise<{ dataUrl: string; blob: Blob }> => {
-  return new Promise((resolve, reject) => {
-    if (!SUPPORTED_MIME_TYPES.includes(file.type.toLowerCase())) {
-      reject(new Error("Supported formats are JPG, PNG, and WEBP only."));
-      return;
-    }
-    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      reject(new Error(`File size must be under ${MAX_FILE_SIZE_MB}MB.`));
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result;
-      if (!result) {
-        reject(new Error("Failed to read image file."));
-        return;
-      }
-
-      const img = new Image();
-      img.onload = () => {
-        const maxDimension = 1800;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-        }
-
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          fetch(String(result))
-            .then((r) => r.blob())
-            .then((blob) => resolve({ dataUrl: String(result), blob }))
-            .catch(() => resolve({ dataUrl: String(result), blob: file }));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-        canvas.toBlob(
-          (blob) => {
-            resolve({ dataUrl, blob: blob || file });
-          },
-          "image/jpeg",
-          0.92
-        );
-      };
-      img.onerror = () => {
-        fetch(String(result))
-          .then((r) => r.blob())
-          .then((blob) => resolve({ dataUrl: String(result), blob }))
-          .catch(() => resolve({ dataUrl: String(result), blob: file }));
-      };
-      img.src = String(result);
-    };
-    reader.onerror = () => reject(new Error("Error reading file."));
-    reader.readAsDataURL(file);
-  });
-};
 
 function classifyCameraError(err: any): {
   status: KycCameraStatus;
@@ -261,7 +184,6 @@ export default function KycCameraCapture({
 }: KycCameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [status, setStatus] = useState<KycCameraStatus>("IDLE");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -366,40 +288,16 @@ export default function KycCameraCapture({
     }
   };
 
-  // User taps "Open Camera & Take Photo" - launches device native camera directly like Deposit Proof
+  // User taps "Open Camera & Take Photo"
   const handleOpenClick = () => {
     if (disabled) return;
     setErrorMessage(null);
-    if (cameraInputRef.current) {
-      cameraInputRef.current.click();
-    } else {
-      startCameraStream(facingMode);
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setStatus("BROWSER_UNSUPPORTED");
+      setErrorMessage("Live camera access is not supported by your browser. Please use a modern browser such as Chrome, Safari, or Edge to capture your live selfie.");
+      return;
     }
-  };
-
-  // Direct device camera capture fallback (e.g. mobile direct camera)
-  const handleDeviceCameraCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      setIsProcessing(true);
-      const { dataUrl, blob } = await processImageFile(file);
-      setCapturedPreview(dataUrl);
-      stopCameraStream();
-      setStatus("CAPTURED");
-      const fileObj = blob instanceof File ? blob : new File([blob], "live_selfie.jpg", { type: "image/jpeg" });
-      onCaptureComplete(fileObj, dataUrl);
-      toast.success("Camera photo uploaded successfully!");
-    } catch (err: any) {
-      const msg = err.message || "Failed to process photo from camera.";
-      setErrorMessage(msg);
-      setStatus("CAMERA_ERROR");
-      toast.error(`Photo upload failed: ${msg}`);
-    } finally {
-      setIsProcessing(false);
-      if (cameraInputRef.current) cameraInputRef.current.value = "";
-    }
+    startCameraStream(facingMode);
   };
 
   // Toggle between Front ('user') and Rear ('environment') cameras
@@ -455,7 +353,7 @@ export default function KycCameraCapture({
           toast.success("Live identity selfie captured successfully!");
         },
         "image/jpeg",
-        0.95
+        0.82
       );
     } catch (err: any) {
       setIsProcessing(false);
@@ -481,21 +379,10 @@ export default function KycCameraCapture({
 
   return (
     <div className="space-y-3" data-testid="kyc-camera-capture-container">
-      {/* Hidden native camera capture fallback input for mobile/device direct capture */}
-      <input
-        type="file"
-        ref={cameraInputRef}
-        onChange={handleDeviceCameraCapture}
-        accept="image/jpeg,image/png,image/webp"
-        capture="user"
-        className="hidden"
-        data-testid="kyc-native-camera-input"
-      />
-
       <div className="flex items-center justify-between">
         <label className="text-xs font-semibold text-ex-text flex items-center gap-1.5">
           <Camera className="h-4 w-4 text-ex-lav-300" />
-          Live Selfie Photo <span className="text-white/40">(Camera only)</span>
+          Live Selfie Photo
         </label>
 
         {status === "CAMERA_ACTIVE" && (
@@ -515,12 +402,12 @@ export default function KycCameraCapture({
           <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-ex-lav-400/15 text-ex-lav-300 mb-3">
             <Video className="h-6 w-6" />
           </div>
-          <h4 className="text-sm font-semibold text-ex-text">Live Camera Photo Required</h4>
+          <h4 className="text-sm font-semibold text-ex-text">Live Camera Photo</h4>
           <p className="mt-1 text-xs text-ex-muted max-w-md mx-auto">
-            Take a real-time live selfie photo using your device camera. Photos are manually reviewed by our compliance team.
+            Take a real-time live selfie photo using your device camera. Pre-recorded or uploaded files are strictly prohibited.
           </p>
 
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
+          <div className="mt-4 flex items-center justify-center">
             <EasyXButton
               type="button"
               variant="accent"
@@ -694,15 +581,7 @@ export default function KycCameraCapture({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-amber-500/20">
-            <button
-              type="button"
-              onClick={() => cameraInputRef.current?.click()}
-              className="text-xs text-white/70 hover:text-white underline mr-auto"
-              data-testid="btn-open-device-camera-fallback"
-            >
-              Open Device Camera Directly
-            </button>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-amber-500/20">
             <EasyXButton
               type="button"
               variant="accent"
@@ -733,15 +612,7 @@ export default function KycCameraCapture({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-amber-500/20">
-            <button
-              type="button"
-              onClick={() => cameraInputRef.current?.click()}
-              className="text-xs text-white/70 hover:text-white underline mr-auto"
-              data-testid="btn-open-device-camera-fallback"
-            >
-              Open Device Camera Directly
-            </button>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-amber-500/20">
             <EasyXButton
               type="button"
               variant="accent"
@@ -773,15 +644,7 @@ export default function KycCameraCapture({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-amber-500/20">
-            <button
-              type="button"
-              onClick={() => cameraInputRef.current?.click()}
-              className="text-xs text-white/70 hover:text-white underline mr-auto"
-              data-testid="btn-open-device-camera-fallback"
-            >
-              Open Device Camera Directly
-            </button>
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-amber-500/20">
             <EasyXButton
               type="button"
               variant="accent"

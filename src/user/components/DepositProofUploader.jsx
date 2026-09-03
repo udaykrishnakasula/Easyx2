@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   AlertCircle,
   FileImage,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EasyXModal, EasyXButton } from "@/design/EasyX";
@@ -81,34 +82,49 @@ export default function DepositProofUploader({
   images = [],
   onChange,
   disabled = false,
+  onUploadingChange,
 }) {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
   const replaceInputRef = useRef(null);
   const [replacingIndex, setReplacingIndex] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadingSlot, setUploadingSlot] = useState(null);
+  const [uploadError, setUploadError] = useState(null);
+
+  const setUploadState = (uploading, slot = null) => {
+    setIsUploading(uploading);
+    setUploadingSlot(slot);
+    onUploadingChange?.(uploading);
+  };
 
   // Handle files chosen from gallery/file picker
   const handleFilesSelected = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    try {
-      const remainingSlots = MAX_IMAGES - images.length;
-      if (remainingSlots <= 0) {
-        toast.error(`Maximum limit reached. You can upload up to ${MAX_IMAGES} payment proof images.`);
-        return;
-      }
+    const remainingSlots = MAX_IMAGES - images.length;
+    if (remainingSlots <= 0) {
+      toast.error(`Maximum limit reached. You can upload up to ${MAX_IMAGES} payment proof images.`);
+      return;
+    }
 
+    setUploadState(true, images.length + 1);
+    setUploadError(null);
+
+    try {
       const filesToProcess = files.slice(0, remainingSlots);
       const newImages = [];
+      let lastErrMsg = null;
 
       for (const file of filesToProcess) {
         try {
           const dataUrl = await processImageFile(file);
           newImages.push(dataUrl);
         } catch (err) {
-          toast.error(`Upload failed for "${file.name}": ${err.message || "Could not process image."}`);
+          lastErrMsg = err.message || "Could not process image.";
+          toast.error(`Upload failed for "${file.name}": ${lastErrMsg}`);
         }
       }
 
@@ -116,11 +132,14 @@ export default function DepositProofUploader({
         onChange([...images, ...newImages]);
         toast.success(
           newImages.length === 1
-            ? "Payment proof image uploaded successfully!"
+            ? `Payment proof #${images.length + 1} uploaded successfully!`
             : `Uploaded ${newImages.length} payment proof images successfully!`
         );
+      } else if (lastErrMsg) {
+        setUploadError(lastErrMsg);
       }
     } finally {
+      setUploadState(false, null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
@@ -131,17 +150,24 @@ export default function DepositProofUploader({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (images.length >= MAX_IMAGES) {
+      toast.error(`Maximum limit reached. You can upload up to ${MAX_IMAGES} payment proof images.`);
+      return;
+    }
+
+    setUploadState(true, images.length + 1);
+    setUploadError(null);
+
     try {
-      if (images.length >= MAX_IMAGES) {
-        toast.error(`Maximum limit reached. You can upload up to ${MAX_IMAGES} payment proof images.`);
-        return;
-      }
       const dataUrl = await processImageFile(file);
       onChange([...images, dataUrl]);
-      toast.success("Payment proof captured and uploaded successfully!");
+      toast.success(`Payment proof #${images.length + 1} captured and uploaded successfully!`);
     } catch (err) {
-      toast.error(`Camera upload failed: ${err.message || "Could not process captured photo."}`);
+      const msg = err.message || "Could not process captured photo.";
+      setUploadError(msg);
+      toast.error(`Camera upload failed: ${msg}`);
     } finally {
+      setUploadState(false, null);
       if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
   };
@@ -151,22 +177,29 @@ export default function DepositProofUploader({
     const file = e.target.files?.[0];
     if (!file || replacingIndex === null) return;
 
+    const targetIdx = replacingIndex;
+    setUploadState(true, targetIdx + 1);
+    setUploadError(null);
+
     try {
       const dataUrl = await processImageFile(file);
       const updated = [...images];
-      updated[replacingIndex] = dataUrl;
+      updated[targetIdx] = dataUrl;
       onChange(updated);
-      toast.success(`Payment proof #${replacingIndex + 1} updated successfully!`);
+      toast.success(`Payment proof #${targetIdx + 1} updated successfully!`);
     } catch (err) {
-      toast.error(`Failed to replace proof #${replacingIndex + 1}: ${err.message || "Could not process image."}`);
+      const msg = err.message || "Could not process image.";
+      setUploadError(msg);
+      toast.error(`Failed to replace proof #${targetIdx + 1}: ${msg}`);
     } finally {
       setReplacingIndex(null);
+      setUploadState(false, null);
       if (replaceInputRef.current) replaceInputRef.current.value = "";
     }
   };
 
   const triggerReplace = (index) => {
-    if (disabled) return;
+    if (disabled || isUploading) return;
     setReplacingIndex(index);
     if (replaceInputRef.current) {
       replaceInputRef.current.click();
@@ -174,7 +207,7 @@ export default function DepositProofUploader({
   };
 
   const removeImage = (index) => {
-    if (disabled) return;
+    if (disabled || isUploading) return;
     const updated = images.filter((_, i) => i !== index);
     onChange(updated);
     toast.info(`Removed proof #${index + 1}.`);
@@ -216,7 +249,7 @@ export default function DepositProofUploader({
           <FileImage className="h-3.5 w-3.5 text-ex-lav-300" />
           <span>Payment Proof</span>
           <span className="text-rose-400 font-bold">*</span>
-          <span className="text-[11px] font-normal text-ex-muted">(1–3 images)</span>
+          <span className="text-[11px] font-normal text-ex-muted">(Proof #1 required, #2 & #3 optional)</span>
         </label>
         <span
           className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
@@ -226,14 +259,31 @@ export default function DepositProofUploader({
           }`}
           data-testid="proof-count-badge"
         >
-          {images.length} / {MAX_IMAGES} uploaded {images.length === 0 && "(Required)"}
+          {images.length} / {MAX_IMAGES} uploaded {images.length === 0 && "(Proof #1 required)"}
         </span>
       </div>
 
       <p className="text-[11px] text-ex-muted leading-relaxed">
-        Upload clear screenshot(s) of your transaction confirmation, receipt, or wallet transfer.
-        Supported formats: <strong>JPG, PNG, WEBP</strong>.
+        Upload clear screenshots of your transaction confirmation, receipt, or wallet transfer.
+        Supported formats: <strong>JPG, PNG, WEBP</strong> (max 10MB each).
       </p>
+
+      {/* Upload Error Banner if image processing failed */}
+      {uploadError && (
+        <div className="flex items-center justify-between gap-2 rounded-ex-ctrl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+            <span>Upload failed: {uploadError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setUploadError(null)}
+            className="text-[11px] font-semibold text-rose-300 hover:text-white underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Proof Images List & Add Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
@@ -258,7 +308,7 @@ export default function DepositProofUploader({
                 <Eye className="h-4 w-4" /> View
               </div>
               <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[10px] font-bold text-white border border-white/10">
-                Proof #{index + 1}
+                Proof #{index + 1} {index === 0 ? "(Required)" : "(Optional)"}
               </div>
               <div className="absolute bottom-1.5 right-1.5 p-1 rounded-full bg-emerald-500 text-black">
                 <CheckCircle2 className="h-3 w-3" />
@@ -270,8 +320,8 @@ export default function DepositProofUploader({
               <button
                 type="button"
                 onClick={() => triggerReplace(index)}
-                disabled={disabled}
-                className="text-[11px] font-medium text-ex-lav-200 hover:text-white flex items-center gap-1 transition px-1.5 py-1 rounded hover:bg-white/5"
+                disabled={disabled || isUploading}
+                className="text-[11px] font-medium text-ex-lav-200 hover:text-white flex items-center gap-1 transition px-1.5 py-1 rounded hover:bg-white/5 disabled:opacity-40"
                 data-testid={`btn-replace-proof-${index}`}
               >
                 <RefreshCw className="h-3 w-3" /> Replace
@@ -279,8 +329,8 @@ export default function DepositProofUploader({
               <button
                 type="button"
                 onClick={() => removeImage(index)}
-                disabled={disabled}
-                className="text-[11px] font-medium text-rose-400 hover:text-rose-300 flex items-center gap-1 transition px-1.5 py-1 rounded hover:bg-rose-500/10"
+                disabled={disabled || isUploading}
+                className="text-[11px] font-medium text-rose-400 hover:text-rose-300 flex items-center gap-1 transition px-1.5 py-1 rounded hover:bg-rose-500/10 disabled:opacity-40"
                 data-testid={`btn-remove-proof-${index}`}
               >
                 <X className="h-3 w-3" /> Remove
@@ -289,8 +339,26 @@ export default function DepositProofUploader({
           </div>
         ))}
 
-        {/* Empty Slot / Add Options (if images < 3) */}
-        {images.length < MAX_IMAGES && (
+        {/* Uploading state slot */}
+        {isUploading && (
+          <div
+            className="rounded-ex-card border border-dashed border-ex-accent/60 bg-ex-accent/[0.08] p-4 flex flex-col items-center justify-center text-center transition min-h-[140px]"
+            data-testid="proof-uploading-slot"
+          >
+            <div className="grid h-10 w-10 place-items-center rounded-full bg-ex-accent/20 text-ex-lav-200 mb-2">
+              <Loader2 className="h-5 w-5 animate-spin text-ex-accent" />
+            </div>
+            <div className="text-xs font-semibold text-ex-text mb-0.5">
+              Uploading Proof #{uploadingSlot || images.length + 1}...
+            </div>
+            <div className="text-[10px] text-ex-muted">
+              Processing and verifying screenshot...
+            </div>
+          </div>
+        )}
+
+        {/* Empty Slot / Add Options (if images < 3 and not uploading) */}
+        {!isUploading && images.length < MAX_IMAGES && (
           <div
             className={`rounded-ex-card border border-dashed p-3.5 flex flex-col items-center justify-center text-center transition ${
               images.length === 0
@@ -303,18 +371,24 @@ export default function DepositProofUploader({
               <Upload className="h-4 w-4" />
             </div>
             <div className="text-xs font-semibold text-ex-text mb-1">
-              {images.length === 0 ? "Add Payment Proof *" : `Add Proof #${images.length + 1}`}
+              {images.length === 0
+                ? "Add Proof #1 *"
+                : images.length === 1
+                ? "Add Proof #2 (Optional)"
+                : "Add Proof #3 (Optional)"}
             </div>
             <div className="text-[10px] text-ex-muted mb-3">
-              {images.length === 0 ? "At least 1 image required" : "Optional additional proof"}
+              {images.length === 0
+                ? "Required proof (transfer screenshot / receipt)"
+                : "Optional additional proof"}
             </div>
 
             <div className="w-full flex flex-col gap-1.5">
               <button
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
-                disabled={disabled}
-                className="w-full py-1.5 px-2.5 rounded-ex-ctrl bg-white/10 hover:bg-white/15 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition border border-white/10"
+                disabled={disabled || isUploading}
+                className="w-full py-1.5 px-2.5 rounded-ex-ctrl bg-white/10 hover:bg-white/15 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition border border-white/10 disabled:opacity-50"
                 data-testid="btn-take-proof-photo"
               >
                 <Camera className="h-3.5 w-3.5 text-ex-accent" /> Take Photo
@@ -323,8 +397,8 @@ export default function DepositProofUploader({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={disabled}
-                className="w-full py-1.5 px-2.5 rounded-ex-ctrl bg-white/5 hover:bg-white/10 text-ex-text text-[11px] font-medium flex items-center justify-center gap-1.5 transition border border-white/10"
+                disabled={disabled || isUploading}
+                className="w-full py-1.5 px-2.5 rounded-ex-ctrl bg-white/5 hover:bg-white/10 text-ex-text text-[11px] font-medium flex items-center justify-center gap-1.5 transition border border-white/10 disabled:opacity-50"
                 data-testid="btn-choose-proof-file"
               >
                 <ImageIcon className="h-3.5 w-3.5 text-ex-lav-200" /> Choose File / Gallery
@@ -334,11 +408,29 @@ export default function DepositProofUploader({
         )}
       </div>
 
-      {/* Validation warning if 0 images attached */}
+      {/* Validation status / requirement guide below cards */}
       {images.length === 0 && (
-        <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90 pt-0.5">
+        <div className="flex items-center gap-1.5 text-[11px] text-amber-300/90 pt-0.5" data-testid="proof-status-hint">
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-          <span>Please upload at least one payment proof image before submitting your deposit.</span>
+          <span>At least one proof of payment is required (Proof #1). Proofs #2 and #3 are optional.</span>
+        </div>
+      )}
+      {images.length === 1 && (
+        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/90 pt-0.5" data-testid="proof-status-hint">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+          <span>Required Proof #1 uploaded. You can submit now, or optionally add Proof #2 and #3.</span>
+        </div>
+      )}
+      {images.length === 2 && (
+        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/90 pt-0.5" data-testid="proof-status-hint">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+          <span>Proof #1 and #2 uploaded. You can submit now, or optionally add Proof #3.</span>
+        </div>
+      )}
+      {images.length === 3 && (
+        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400/90 pt-0.5" data-testid="proof-status-hint">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+          <span>All 3 payment proofs uploaded. Ready to submit.</span>
         </div>
       )}
 

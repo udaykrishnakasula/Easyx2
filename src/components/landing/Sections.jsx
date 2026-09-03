@@ -1,7 +1,9 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Sparkles, Repeat, ShieldCheck, Layers, ArrowRight } from "lucide-react";
 import CardCarousel from "@/components/landing/CardCarousel";
+import { useAuth } from "@/shared/context/AuthContext";
 
 const features = [
   { icon: Sparkles, title: "Native yield", body: "Rewards accrue automatically to your balance — no staking, no lockups, no manual claims." },
@@ -25,6 +27,8 @@ const fade = {
 };
 
 export default function Sections() {
+  const navigate = useNavigate();
+  const { user, isAdmin } = useAuth();
   return (
     <>
       <section className="section sec-dark" data-testid="section-features">
@@ -93,7 +97,7 @@ export default function Sections() {
               className="btn-pill hero__cta"
               data-testid="cta-band-btn"
               style={{ margin: "0 auto" }}
-              onClick={() => window.location.assign("/register")}
+              onClick={() => navigate(user ? (isAdmin ? "/admin" : "/dashboard") : "/register")}
             >
               Join us
               <span className="hero__cta-arrow"><ArrowRight size={22} /></span>

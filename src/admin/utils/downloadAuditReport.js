@@ -222,7 +222,7 @@ Overall Health Score: 78 / 100
 | \`GEMINI_API_KEY\` | Server-Only | Yes (for AI Support) | Configured / Falls back to rule-based engine if absent |
 | \`JWT_SECRET\` | Server-Only | **CRITICAL** | Has unsafe dev default string fallback |
 | \`APP_URL\` | Server-Only | Yes (for email links) | Defaults to \`http://localhost:3000\` |
-| \`ADMIN_EMAIL\` | Server-Only | Recommended | Defaults to \`admin@easyx.com\` |
+| \`ADMIN_EMAIL\` | Server-Only | Recommended | Defaults to \`subamcollection@gmail.com\` |
 | \`ADMIN_PASSWORD\` | Server-Only | Recommended | Defaults to \`Admin@123456\` |
 | \`RESEND_API_KEY\` | Server-Only | Yes (for real emails) | Falls back to console log if unset |
 | \`SENDGRID_API_KEY\`| Server-Only | Alternative | Falls back to Resend or console log |

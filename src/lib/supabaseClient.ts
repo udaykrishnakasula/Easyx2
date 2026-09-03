@@ -37,15 +37,7 @@ export function getSupabaseClient(): SupabaseClient | null {
   return clientInstance;
 }
 
-export const supabase = isSupabaseConfigured()
-  ? createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    })
-  : null;
+export const supabase = getSupabaseClient();
 
 /**
  * Realtime subscription helper for user-specific events (e.g. notifications, balance updates)

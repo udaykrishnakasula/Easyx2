@@ -121,12 +121,25 @@ Component Stack: ${errorInfo?.componentStack || "N/A"}`;
               </button>
 
               <button
-                onClick={() => (window.location.href = "/")}
+                onClick={() => {
+                  let target = "/";
+                  try {
+                    const hasToken = typeof localStorage !== "undefined" && Boolean(localStorage.getItem("easyx_token"));
+                    if (hasToken) {
+                      const rawUser = localStorage.getItem("easyx_user");
+                      const parsedUser = rawUser ? JSON.parse(rawUser) : null;
+                      target = parsedUser?.role === "admin" ? "/admin" : "/dashboard";
+                    }
+                  } catch {
+                    target = "/";
+                  }
+                  window.location.assign(target);
+                }}
                 className="w-full sm:flex-1 py-2.5 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-ex-text text-xs font-semibold flex items-center justify-center gap-2 border border-white/10 transition-all"
                 data-testid="error-home-btn"
               >
                 <Home className="h-4 w-4" />
-                <span>Return to Home</span>
+                <span>Return to App</span>
               </button>
 
               <button

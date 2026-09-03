@@ -189,7 +189,17 @@ export function useKyc() {
 export function useSubmitKyc() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ idType, idNumber, address, idDocument, idFrontDocument, idBackDocument, selfie, livenessSessionId }) => {
+    mutationFn: async ({
+      idType,
+      idNumber,
+      address,
+      idDocument,
+      idFrontDocument,
+      idBackDocument,
+      selfie,
+      livenessSessionId,
+      onProgress,
+    }) => {
       const form = new FormData();
       form.append("id_type", idType);
       if (idNumber) form.append("id_number", String(idNumber).trim());
@@ -203,7 +213,14 @@ export function useSubmitKyc() {
       if (idDocument) form.append("id_document", idDocument, idDocument.name || "id_document.jpg");
       if (selfie) form.append("selfie", selfie, selfie.name || "selfie.jpg");
       if (livenessSessionId) form.append("liveness_session_id", String(livenessSessionId).trim());
-      const res = await api.post("/kyc/submit", form);
+      const res = await api.post("/kyc/submit", form, {
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total && onProgress) {
+            const percent = Math.min(99, Math.round((progressEvent.loaded * 100) / progressEvent.total));
+            onProgress(percent);
+          }
+        },
+      });
       return res.data;
     },
     onSuccess: () => {

@@ -1,5 +1,6 @@
 import React, { useRef, useCallback, useState, useEffect } from "react";
 import Autoplay from "embla-carousel-autoplay";
+import { motion } from "framer-motion";
 import {
   Carousel,
   CarouselContent,
@@ -78,9 +79,14 @@ export default function CardCarousel() {
             data-testid={`carousel-card-${variant}`}
             className="basis-auto shrink-0 grow-0 flex justify-center px-6"
           >
-            <div className="w-[420px] max-w-[82vw]">
+            <motion.div
+              whileHover={{ scale: 1.025, y: -6 }}
+              whileTap={{ scale: 0.985 }}
+              transition={{ type: "spring", stiffness: 380, damping: 24 }}
+              className="w-[420px] max-w-[82vw] cursor-pointer"
+            >
               <InvestmentCard variant={variant} className="mx-auto" />
-            </div>
+            </motion.div>
           </CarouselItem>
         ))}
       </CarouselContent>

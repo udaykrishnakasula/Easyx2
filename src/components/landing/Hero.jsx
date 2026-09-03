@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/shared/context/AuthContext";
 import localCoinMp4 from "@/assets/coin.mp4";
 
 const EasyxMark = () => (
@@ -29,6 +30,7 @@ const RAW_VIDEO_URL =
 
 export default function Hero() {
   const navigate = useNavigate();
+  const { user, isAdmin } = useAuth();
   const videoRef = useRef(null);
   const [videoSrc, setVideoSrc] = useState(RAW_VIDEO_URL);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
@@ -163,7 +165,7 @@ export default function Hero() {
           <motion.button
             className="btn-pill hero__cta"
             data-testid="hero-join-btn"
-            onClick={() => navigate("/register")}
+            onClick={() => navigate(user ? (isAdmin ? "/admin" : "/dashboard") : "/register")}
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.3, ease: [0.2, 0.8, 0.2, 1] }}

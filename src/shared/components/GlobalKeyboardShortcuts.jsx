@@ -111,7 +111,6 @@ export default function GlobalKeyboardShortcuts() {
         toast.success("Signed out successfully");
       },
       icon: LogOut,
-      shortcut: "Shift+Q",
     });
 
     return items;
@@ -347,15 +346,6 @@ export default function GlobalKeyboardShortcuts() {
         // Single key listeners to initiate chord sequence
         if (key === "g" || (key === "a" && isAdmin)) {
           keySequenceRef.current = { key, timestamp: now };
-          return;
-        }
-
-        // Direct single key shortcuts
-        if (e.shiftKey && key === "q") {
-          e.preventDefault();
-          navigate("/", { replace: true });
-          logout();
-          toast.success("Signed out");
           return;
         }
       }

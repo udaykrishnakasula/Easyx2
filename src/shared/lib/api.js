@@ -134,8 +134,11 @@ api.interceptors.response.use(
     }
 
     if (status === 401) {
-      // Token invalid/expired — clear it. Route guards handle redirect.
-      clearToken();
+      const url = error?.config?.url || "";
+      // Only clear token if the dedicated session verification endpoint confirms token rejection
+      if (url.includes("/auth/me") || url.includes("/auth/refresh")) {
+        clearToken();
+      }
     }
 
     return Promise.reject(error);

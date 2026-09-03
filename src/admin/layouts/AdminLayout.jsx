@@ -34,6 +34,7 @@ import { useAdminOverview } from "@/admin/adminApi";
 import { useRealtimeNotifications } from "@/shared/hooks/useRealtimeNotifications";
 import { toast } from "sonner";
 import AppLogo from "@/shared/components/AppLogo";
+import SectionErrorBoundary from "@/shared/analytics/SectionErrorBoundary";
 
 export const ADMIN_NAV_GROUPS = [
   {
@@ -402,7 +403,9 @@ export default function AdminLayout() {
 
         {/* Main Content */}
         <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto">
-          <Outlet />
+          <SectionErrorBoundary name="AdminLayoutContent" title="Could not load admin view">
+            <Outlet />
+          </SectionErrorBoundary>
         </main>
       </div>
     </div>

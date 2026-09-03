@@ -17,17 +17,24 @@ export default function TransactionsPage() {
       ) : (
         <div className="mt-5">
           <EasyXTable columns={["Type", "Amount", "Balance after", "Status", "Date"]}>
-            {data.map((t) => (
-              <tr key={t.id}>
-                <td className="px-4 py-3 capitalize text-ex-text">{t.type.replace(/_/g, " ").toLowerCase()}</td>
-                <td className={`px-4 py-3 font-semibold ${t.direction === "credit" ? "text-emerald-300" : "text-red-300"}`}>
-                  {t.direction === "credit" ? "+" : "-"}{money(t.amount)}
-                </td>
-                <td className="px-4 py-3 text-ex-text">{money(t.balance_after)}</td>
-                <td className="px-4 py-3"><EasyXStatusBadge status={t.status} /></td>
-                <td className="px-4 py-3 text-ex-muted whitespace-nowrap">{dayjs(t.created_at).format("DD MMM YYYY, HH:mm")}</td>
-              </tr>
-            ))}
+            {(Array.isArray(data) ? data : []).map((t) => {
+              if (!t) return null;
+              return (
+                <tr key={t.id || Math.random()}>
+                  <td className="px-4 py-3 capitalize text-ex-text">
+                    {t.type ? String(t.type).replace(/_/g, " ").toLowerCase() : "transaction"}
+                  </td>
+                  <td className={`px-4 py-3 font-semibold ${t.direction === "credit" ? "text-emerald-300" : "text-red-300"}`}>
+                    {t.direction === "credit" ? "+" : "-"}{money(t.amount)}
+                  </td>
+                  <td className="px-4 py-3 text-ex-text">{money(t.balance_after)}</td>
+                  <td className="px-4 py-3"><EasyXStatusBadge status={t.status || "completed"} /></td>
+                  <td className="px-4 py-3 text-ex-muted whitespace-nowrap">
+                    {t.created_at ? dayjs(t.created_at).format("DD MMM YYYY, HH:mm") : "—"}
+                  </td>
+                </tr>
+              );
+            })}
           </EasyXTable>
         </div>
       )}

@@ -22,11 +22,13 @@ import {
   ExternalLink,
   HelpCircle,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useKyc, useSubmitKyc, useSupportTickets } from "@/user/api";
 import { apiError } from "@/shared/lib/api";
+import { compressKycDocument } from "@/shared/utils/imageCompressor";
 import {
   PageHeading,
   EasyXCard,
@@ -46,7 +48,7 @@ const ID_TYPES = [
   { value: "other", label: "Other Government ID", placeholder: "e.g. GOV-98765432", helper: "4 to 32 alphanumeric characters" },
 ];
 
-const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const MIN_BYTES = 100; // 100 Bytes
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"];
 const ALLOWED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".pdf"];
@@ -70,8 +72,11 @@ function validateFileObject(f) {
   if (mime && !ALLOWED_MIME_TYPES.includes(mime) && !hasValidExt) {
     return "Invalid file format. Only JPG, PNG, WebP, or PDF documents are accepted.";
   }
+  if (!mime && !hasValidExt) {
+    return "Please choose a valid JPG, PNG, WebP, or PDF file.";
+  }
   if (f.size > MAX_BYTES) {
-    return `File is too large (${formatBytes(f.size)}). Maximum allowed size is 5 MB.`;
+    return `File is too large (${formatBytes(f.size)}). Maximum allowed size is 10 MB.`;
   }
   if (f.size < MIN_BYTES) {
     return "File appears empty or corrupted. Please choose a valid file.";
@@ -129,6 +134,8 @@ function FileField({ label, file, onPick, onRemove, testId, hint, error, require
   const inputRef = useRef(null);
   const [preview, setPreview] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optStats, setOptStats] = useState(null);
 
   // Generate instant image preview URL
   useEffect(() => {
@@ -141,13 +148,34 @@ function FileField({ label, file, onPick, onRemove, testId, hint, error, require
     return undefined;
   }, [file]);
 
-  const handleFileChange = (incoming) => {
+  const handleFileChange = async (incoming) => {
     if (!incoming) return;
-    const err = validateFileObject(incoming);
-    if (err) {
-      toast.error(err);
+
+    // Immediately set and validate user's chosen file with zero delay
+    setOptStats(null);
+    const initialErr = validateFileObject(incoming);
+    if (initialErr) {
+      toast.error(initialErr);
     }
     onPick(incoming);
+
+    // Run high-performance background compression for camera photos and large images
+    const isImage = incoming.type?.startsWith("image/") || /\.(jpg|jpeg|png|webp|heic)$/i.test(incoming.name || "");
+    if (isImage && incoming.size > 250 * 1024) {
+      setIsOptimizing(true);
+      try {
+        const result = await compressKycDocument(incoming);
+        setIsOptimizing(false);
+        if (result && result.wasCompressed && result.file) {
+          const savings = Math.round(((result.originalSize - result.compressedSize) / result.originalSize) * 100);
+          setOptStats({ original: result.originalSize, compressed: result.compressedSize, savings });
+          onPick(result.file);
+        }
+      } catch (e) {
+        console.warn("Background optimization notice:", e);
+        setIsOptimizing(false);
+      }
+    }
   };
 
   const handleDrop = (e) => {
@@ -177,18 +205,32 @@ function FileField({ label, file, onPick, onRemove, testId, hint, error, require
           {label}
           {required && <span className="text-rose-400 font-bold">*</span>}
         </label>
-        {file && !error && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
-            <Check className="h-3 w-3" /> Valid Document ({formatBytes(file.size)})
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {isOptimizing && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full animate-pulse border border-amber-500/20">
+              <RefreshCw className="h-2.5 w-2.5 animate-spin" /> Optimizing for fast upload...
+            </span>
+          )}
+          {optStats && !error && (
+            <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+              <Sparkles className="h-2.5 w-2.5 text-emerald-400" />
+              Fast-Upload ({formatBytes(optStats.original)} → {formatBytes(optStats.compressed)}, -{optStats.savings}%)
+            </span>
+          )}
+          {file && !error && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+              <Check className="h-3 w-3" /> Valid ({formatBytes(file.size)})
+            </span>
+          )}
+        </div>
       </div>
 
       <div
+        onClick={() => inputRef.current?.click()}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        className={`relative flex items-center gap-3.5 p-3 rounded-ex-ctrl border transition-all ${
+        className={`relative flex items-center gap-3.5 p-3 rounded-ex-ctrl border cursor-pointer select-none transition-all ${
           error
             ? "border-rose-500/60 bg-rose-500/[0.04]"
             : file
@@ -218,24 +260,17 @@ function FileField({ label, file, onPick, onRemove, testId, hint, error, require
 
         {/* Info & Select Area */}
         <div className="flex-1 min-w-0">
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            data-testid={testId}
-            className="w-full text-left focus:outline-none group"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="block truncate text-xs font-semibold text-ex-text group-hover:text-purple-300 transition">
-                {file ? file.name : "Choose or drag ID document file"}
-              </span>
-              <span className="text-[11px] font-semibold text-purple-400 hover:text-purple-300 shrink-0">
-                {file ? "Change" : "Browse"}
-              </span>
-            </div>
-            <span className="block text-[11px] text-ex-muted truncate mt-0.5">
-              {file ? `${file.type || "Document"} · ${formatBytes(file.size)}` : hint}
+          <div className="flex items-center justify-between gap-2">
+            <span className="block truncate text-xs font-semibold text-ex-text group-hover:text-purple-300 transition">
+              {file ? file.name : "Choose or drag ID document file"}
             </span>
-          </button>
+            <span className="text-[11px] font-semibold text-purple-400 hover:text-purple-300 shrink-0">
+              {file ? "Change" : "Browse"}
+            </span>
+          </div>
+          <span className="block text-[11px] text-ex-muted truncate mt-0.5">
+            {file ? `${file.type || "Document"} · ${formatBytes(file.size)}` : hint}
+          </span>
         </div>
 
         {/* Remove Button if file selected */}
@@ -244,6 +279,7 @@ function FileField({ label, file, onPick, onRemove, testId, hint, error, require
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              setOptStats(null);
               onRemove();
             }}
             title="Remove document"
@@ -259,7 +295,7 @@ function FileField({ label, file, onPick, onRemove, testId, hint, error, require
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp,application/pdf"
+        accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/jpg,image/png,image/webp,application/pdf"
         className="hidden"
         onChange={(e) => {
           handleFileChange(e.target.files?.[0] || null);
@@ -392,6 +428,10 @@ export default function KYCPage() {
 
   // Support Ticket Modal for Approved KYC Modifications
   const [showTicketModal, setShowTicketModal] = useState(false);
+
+  // Upload Progress & Stage Tracking for Instant User Feedback
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStage, setUploadStage] = useState("");
 
   // Pre-populate fields from previously submitted / rejected KYC record so user can edit cleanly
   useEffect(() => {
@@ -604,24 +644,63 @@ export default function KYCPage() {
     }
 
     try {
+      setUploadProgress(15);
+      setUploadStage("Validating and optimizing documents...");
+
+      let readyFront = idFrontDoc;
+      let readyBack = idBackDoc;
+      let readyDoc = idDoc;
+
+      // Ensure any document not already compressed is quickly optimized
+      if (isAadhaar) {
+        if (readyFront?.type?.startsWith("image/") && readyFront.size > 200 * 1024) {
+          const res = await compressKycDocument(readyFront);
+          if (res.wasCompressed) readyFront = res.file;
+        }
+        if (readyBack?.type?.startsWith("image/") && readyBack.size > 200 * 1024) {
+          const res = await compressKycDocument(readyBack);
+          if (res.wasCompressed) readyBack = res.file;
+        }
+      } else {
+        if (readyDoc?.type?.startsWith("image/") && readyDoc.size > 200 * 1024) {
+          const res = await compressKycDocument(readyDoc);
+          if (res.wasCompressed) readyDoc = res.file;
+        }
+      }
+
+      setUploadProgress(30);
+      setUploadStage("Fast-uploading encrypted verification documents...");
+
+      const onUploadProgress = (p) => {
+        const mapped = Math.round(30 + (p * 0.6));
+        setUploadProgress(mapped);
+        if (mapped >= 85) {
+          setUploadStage("Finalizing compliance & verification checks...");
+        }
+      };
+
       if (isAadhaar) {
         await submitKyc.mutateAsync({
           idType,
           idNumber: idNumber.trim(),
           address: address.trim(),
-          idFrontDocument: idFrontDoc,
-          idBackDocument: idBackDoc,
+          idFrontDocument: readyFront,
+          idBackDocument: readyBack,
           selfie: selfieBlob,
+          onProgress: onUploadProgress,
         });
       } else {
         await submitKyc.mutateAsync({
           idType,
           idNumber: idNumber.trim(),
           address: address.trim(),
-          idDocument: idDoc,
+          idDocument: readyDoc,
           selfie: selfieBlob,
+          onProgress: onUploadProgress,
         });
       }
+      setUploadProgress(100);
+      setUploadStage("Verification submitted successfully!");
       toast.success("KYC submitted successfully — pending manual admin review!");
       setIdNumber("");
       setIdDoc(null);
@@ -630,6 +709,8 @@ export default function KYCPage() {
       setSelfieBlob(null);
       setHasAttemptedSubmit(false);
     } catch (err) {
+      setUploadProgress(0);
+      setUploadStage("");
       const respData = err?.response?.data;
       if (respData?.field) {
         setServerErrors({ [respData.field]: respData.detail || respData.message });
@@ -958,6 +1039,31 @@ export default function KYCPage() {
                       {!isAadhaar && !idDoc && <li>Upload your official Government ID document</li>}
                       {!selfieBlob && <li>Take a live camera selfie to verify your face</li>}
                     </ul>
+                  </div>
+                )}
+
+                {/* Real-time Fast Upload Progress Card */}
+                {submitKyc.isPending && (
+                  <div className="p-4 rounded-xl border border-purple-500/30 bg-purple-950/40 backdrop-blur space-y-2.5 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-purple-200 flex items-center gap-2">
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-purple-400" />
+                        {uploadStage || "Uploading KYC documents..."}
+                      </span>
+                      <span className="font-bold text-purple-300 font-mono text-sm">{uploadProgress}%</span>
+                    </div>
+                    <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-400 transition-all duration-300 ease-out rounded-full"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-purple-300/80 pt-0.5">
+                      <span className="flex items-center gap-1 text-emerald-300 font-medium">
+                        <Sparkles className="h-3 w-3 text-emerald-400" /> Fast-Upload compression active
+                      </span>
+                      <span className="text-ex-muted font-medium">Encrypted SSL Transmission</span>
+                    </div>
                   </div>
                 )}
 

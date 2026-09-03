@@ -11,6 +11,8 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronUp,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/shared/context/AuthContext";
@@ -40,6 +42,9 @@ export default function ProfilePage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
   const isKycApproved = user?.kyc_status === "approved";
@@ -94,18 +99,29 @@ export default function ProfilePage() {
       notifyError("Passwords do not match", "Please ensure your new password matches the confirmation.");
       return;
     }
+    if (currentPassword === newPassword) {
+      notifyError("Password unchanged", "New password must be different from your current password.");
+      return;
+    }
 
     setChangingPassword(true);
     try {
-      await changeUserPassword({
+      const res = await changeUserPassword({
         current_password: currentPassword,
         new_password: newPassword,
+        confirm_password: confirmPassword,
       });
-      notifySuccess("Password updated successfully", "Your account credentials have been updated.");
+      notifySuccess(
+        "Password updated successfully",
+        res?.message || "Your old password has been deleted. Use your new password to sign in next time."
+      );
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       setShowPasswordForm(false);
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
     } catch (err) {
       notifyError(
         "Could not update password",
@@ -328,6 +344,10 @@ export default function ProfilePage() {
 
         {showPasswordForm && (
           <form onSubmit={handleChangePassword} className="mt-5 pt-5 border-t border-white/8 space-y-4">
+            <div className="p-3 rounded-xl bg-ex-lav-500/10 border border-ex-lav-400/20 text-xs text-ex-lav-200">
+              Enter your current password to update to a new secure password. Once updated, your old password is deleted and permanently revoked.
+            </div>
+
             <div className="max-w-md">
               <label className="block text-xs font-semibold text-ex-muted mb-1.5">
                 Current Password
@@ -335,13 +355,22 @@ export default function ProfilePage() {
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ex-muted" />
                 <input
-                  type="password"
+                  type={showCurrentPassword ? "text" : "password"}
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full rounded-xl bg-white/5 border border-white/10 pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-ex-lav-400 focus:outline-none transition-colors"
+                  className="w-full rounded-xl bg-white/5 border border-white/10 pl-10 pr-10 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-ex-lav-400 focus:outline-none transition-colors"
                   data-testid="current-password-input"
+                  autoComplete="current-password"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ex-muted hover:text-white p-1 rounded transition-colors"
+                  aria-label={showCurrentPassword ? "Hide password" : "Show password"}
+                >
+                  {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
             </div>
 
@@ -353,13 +382,22 @@ export default function ProfilePage() {
                 <div className="relative">
                   <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ex-muted" />
                   <input
-                    type="password"
+                    type={showNewPassword ? "text" : "password"}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="Minimum 8 characters"
-                    className="w-full rounded-xl bg-white/5 border border-white/10 pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-ex-lav-400 focus:outline-none transition-colors"
+                    className="w-full rounded-xl bg-white/5 border border-white/10 pl-10 pr-10 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-ex-lav-400 focus:outline-none transition-colors"
                     data-testid="new-password-input"
+                    autoComplete="new-password"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-ex-muted hover:text-white p-1 rounded transition-colors"
+                    aria-label={showNewPassword ? "Hide password" : "Show password"}
+                  >
+                    {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
 
@@ -370,13 +408,22 @@ export default function ProfilePage() {
                 <div className="relative">
                   <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ex-muted" />
                   <input
-                    type="password"
+                    type={showConfirmPassword ? "text" : "password"}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Re-enter new password"
-                    className="w-full rounded-xl bg-white/5 border border-white/10 pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-ex-lav-400 focus:outline-none transition-colors"
+                    className="w-full rounded-xl bg-white/5 border border-white/10 pl-10 pr-10 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-ex-lav-400 focus:outline-none transition-colors"
                     data-testid="confirm-password-input"
+                    autoComplete="new-password"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-ex-muted hover:text-white p-1 rounded transition-colors"
+                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
             </div>

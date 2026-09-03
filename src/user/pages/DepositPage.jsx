@@ -7,6 +7,8 @@ import {
   ShieldCheck,
   FileImage,
   Eye,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { toast } from "sonner";
@@ -48,30 +50,102 @@ export default function DepositPage() {
   const [amount, setAmount] = useState("");
   const [txHash, setTxHash] = useState("");
   const [proofImages, setProofImages] = useState([]);
+  const [isUploadingProof, setIsUploadingProof] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
   const [copied, setCopied] = useState(false);
   const [previewModalImg, setPreviewModalImg] = useState(null);
 
   const min = Number(config?.min_deposit ?? 300);
   const address = config?.addresses?.[network] || "";
   const isNetworkConfigured =
-    network === "TRC20"
-      ? (config?.trc20_ready ?? Boolean(address))
-      : (config?.bep20_ready ?? Boolean(address));
+    Boolean(address) &&
+    (network === "TRC20"
+      ? (config?.trc20_ready !== false)
+      : (config?.bep20_ready !== false));
 
   const amountNum = parseFloat(amount);
+  const isAmountValid = amount !== "" && !isNaN(amountNum) && amountNum >= min;
   const amountError =
     amount !== "" && (isNaN(amountNum) || amountNum < min)
       ? `Minimum deposit is ${money(min)} USDT`
       : "";
 
-  // Validation: Required 1-3 proof images, valid amount. Transaction hash is OPTIONAL.
+  // Proof requirement: Only Proof #1 is REQUIRED; Proof #2 and #3 are OPTIONAL
+  const hasRequiredProofs = proofImages.length >= 1;
+
+  // Track itemized missing requirements to inform the user exactly what is needed
+  const missingRequirements = [];
+  if (isDepositBlocked) {
+    missingRequirements.push(maintenance?.message || "Deposits are temporarily disabled for maintenance.");
+  }
+  if (!isNetworkConfigured) {
+    missingRequirements.push(`The ${network} deposit address is not configured.`);
+  }
+  if (!amount || amount.trim() === "") {
+    missingRequirements.push(`Enter a deposit amount (min ${money(min)} USDT).`);
+  } else if (amountError) {
+    missingRequirements.push(amountError);
+  }
+  if (isUploadingProof) {
+    missingRequirements.push("Wait for payment proof upload to complete.");
+  }
+  if (!hasRequiredProofs) {
+    missingRequirements.push("At least one proof of payment is required (Proof #1).");
+  }
+
+  // Validation: All required conditions satisfied
   const canSubmit =
     !isDepositBlocked &&
     isNetworkConfigured &&
-    !amountError &&
-    amount !== "" &&
-    proofImages.length >= 1 &&
+    isAmountValid &&
+    hasRequiredProofs &&
+    !isUploadingProof &&
     !createDeposit.isPending;
+
+  const getRequirementGuidance = () => {
+    if (isDepositBlocked) {
+      return {
+        type: "error",
+        text: maintenance?.message || "USDT deposits are temporarily disabled for scheduled maintenance.",
+      };
+    }
+    if (!isNetworkConfigured) {
+      return {
+        type: "error",
+        text: `The ${network} deposit address is not configured yet.`,
+      };
+    }
+    if (!amount || amount.trim() === "") {
+      return {
+        type: "info",
+        text: `Please enter deposit amount (minimum ${money(min)} USDT).`,
+      };
+    }
+    if (amountError) {
+      return {
+        type: "error",
+        text: amountError,
+      };
+    }
+    if (isUploadingProof) {
+      return {
+        type: "info",
+        text: "Payment proof upload in progress, please wait...",
+      };
+    }
+    if (proofImages.length === 0) {
+      return {
+        type: "warning",
+        text: "At least one proof of payment is required (Proof #1). Proofs #2 and #3 are optional.",
+      };
+    }
+    return {
+      type: "success",
+      text: "All required deposit conditions satisfied. Ready to submit.",
+    };
+  };
+
+  const guidance = getRequirementGuidance();
 
   useEffect(() => {
     setCopied(false);
@@ -90,8 +164,12 @@ export default function DepositPage() {
 
   const submit = async (e) => {
     e.preventDefault();
+    setSubmitError(null);
+
+    if (createDeposit.isPending) return;
+
     if (proofImages.length === 0) {
-      toast.error("Please upload at least one payment proof screenshot before submitting your deposit.");
+      toast.error("Please upload Proof #1 before submitting your deposit (Proof #2 & #3 are optional).");
       return;
     }
     if (!canSubmit) return;
@@ -107,8 +185,15 @@ export default function DepositPage() {
       setAmount("");
       setTxHash("");
       setProofImages([]);
+      setSubmitError(null);
     } catch (err) {
-      toast.error(apiError(err, "Could not submit deposit. Please check your transaction details and try again."));
+      const msg = apiError(
+        err,
+        "Could not submit deposit. Please check your transaction details and try again."
+      );
+      setSubmitError(msg);
+      toast.error(msg);
+      // Stay on the deposit screen, preserve user entered data
     }
   };
 
@@ -242,24 +327,110 @@ export default function DepositPage() {
                 <p className="mt-1 text-[11px] text-ex-muted">Each transaction hash can only be submitted once (if provided).</p>
               </div>
 
-              {/* Payment Proof Upload Section (REQUIRED: 1 to 3 images) */}
+              {/* Payment Proof Upload Section (Proof #1 & #2 required, #3 optional) */}
               <div className="pt-1">
                 <DepositProofUploader
                   images={proofImages}
                   onChange={setProofImages}
                   disabled={createDeposit.isPending}
+                  onUploadingChange={setIsUploadingProof}
                 />
               </div>
+
+              {/* Submission Error Banner (kept on deposit page, no navigation away) */}
+              {submitError && (
+                <div
+                  className="rounded-ex-ctrl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-300 flex items-start gap-2.5"
+                  data-testid="deposit-submit-error"
+                >
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-rose-400 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="font-semibold text-rose-200">Deposit Submission Failed</div>
+                    <div className="mt-0.5 text-[11px] leading-relaxed text-rose-300/90">{submitError}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSubmitError(null)}
+                    className="text-[11px] font-semibold text-rose-400 hover:text-white"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Clear visual indicator of missing requirements when Submit is disabled */}
+              {!createDeposit.isPending && (
+                <div
+                  className={`rounded-ex-ctrl p-3 text-xs transition border ${
+                    canSubmit
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                      : "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                  }`}
+                  data-testid="deposit-validation-hint"
+                >
+                  <div className="flex items-start gap-2">
+                    {canSubmit ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+                    )}
+                    <div className="flex-1">
+                      <div className="font-semibold text-xs text-ex-text">
+                        {canSubmit ? "Ready to Submit" : "Requirements to Enable Submission"}
+                      </div>
+                      <div className="mt-1 text-[11px] leading-relaxed text-ex-muted">
+                        {canSubmit ? (
+                          <span className="text-emerald-300 font-medium">
+                            All required conditions satisfied (Amount valid & at least one proof attached).
+                          </span>
+                        ) : (
+                          <div className="space-y-1">
+                            <span className="text-amber-300/90 font-medium">
+                              Complete the following to enable the Submit button:
+                            </span>
+                            <ul className="mt-1 space-y-1 pl-1">
+                              {missingRequirements.map((req, idx) => (
+                                <li key={idx} className="flex items-center gap-1.5 text-amber-300 font-medium">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
+                                  <span>{req}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <EasyXButton
                 type="submit"
                 className="w-full"
-                disabled={!canSubmit}
+                disabled={!canSubmit || createDeposit.isPending}
                 loading={createDeposit.isPending}
                 data-testid="deposit-submit"
               >
-                Submit deposit
+                {createDeposit.isPending ? "Submitting deposit..." : "Submit deposit"}
               </EasyXButton>
+
+              {/* Explicit disabled helper note directly below button */}
+              {!canSubmit && !createDeposit.isPending && (
+                <div
+                  className="text-center text-[11px] text-amber-400/90 font-medium -mt-2"
+                  data-testid="submit-disabled-reason"
+                >
+                  {!hasRequiredProofs && (!amount || amount.trim() === "")
+                    ? "Enter deposit amount and upload at least one proof of payment to proceed."
+                    : !hasRequiredProofs
+                    ? "At least one proof of payment is required to submit (Proofs #2 & #3 are optional)."
+                    : amountError
+                    ? amountError
+                    : !amount || amount.trim() === ""
+                    ? `Enter a valid deposit amount (min ${money(min)} USDT).`
+                    : "Please complete the required deposit fields above to enable submission."}
+                </div>
+              )}
             </form>
           </EasyXCard>
         </div>

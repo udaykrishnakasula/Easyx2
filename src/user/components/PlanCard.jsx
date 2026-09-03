@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Lock, ArrowRight, TrendingUp, Plus } from "lucide-react";
 import dayjs from "dayjs";
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 
 import { PLAN_THEME } from "./plan-theme";
 import { money } from "@/user/api";
@@ -15,27 +16,58 @@ export default function PlanCard({ plan, userName, walletBalance }) {
 
   return (
     <>
-      <div
-        className="relative overflow-hidden rounded-ex border border-white/8 p-5 min-h-[280px] flex flex-col ex-hover"
+      <motion.div
+        className="group relative overflow-hidden rounded-ex border border-white/8 p-5 min-h-[280px] flex flex-col cursor-pointer transition-colors duration-300 hover:border-white/20"
         data-testid={`dash-plan-${plan.key}`}
         data-unlocked={plan.unlocked ? "true" : "false"}
-        style={{ background: theme.surface, boxShadow: `0 24px 60px -34px ${theme.glow}` }}
+        whileHover={{
+          scale: 1.025,
+          y: -5,
+          boxShadow: `0 32px 70px -20px ${theme.glow}, 0 0 0 1px ${theme.accent}40`,
+        }}
+        whileTap={{ scale: 0.985 }}
+        transition={{
+          type: "spring",
+          stiffness: 400,
+          damping: 25,
+        }}
+        style={{
+          background: theme.surface,
+          boxShadow: `0 24px 60px -34px ${theme.glow}`,
+        }}
       >
-        {/* top accent line */}
-        <div className="absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${theme.accent}55, transparent)` }} />
+        {/* Soft radial ambient shimmer on hover */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-ex"
+          style={{
+            background: `radial-gradient(500px circle at 50% 0%, ${theme.glow} 0%, transparent 70%)`,
+          }}
+        />
 
-        <div className="flex items-center justify-between">
+        {/* top accent line */}
+        <motion.div
+          className="absolute inset-x-0 top-0 h-px"
+          style={{ background: `linear-gradient(90deg, transparent, ${theme.accent}77, transparent)` }}
+          initial={{ opacity: 0.7 }}
+          whileHover={{ opacity: 1, height: "1.5px" }}
+          transition={{ duration: 0.25 }}
+        />
+
+        <div className="relative z-10 flex items-center justify-between">
           <span className={`ex-eyebrow ${theme.label}`}>{plan.name}</span>
           <EasyXStatusBadge status={plan.unlocked ? "unlocked" : "locked"} />
         </div>
 
-        {plan.unlocked ? (
-          <UnlockedBody plan={plan} theme={theme} userName={userName}
-            onView={() => navigate(`/app/investments?plan=${plan.key}`)} onBuyMore={() => setOpen(true)} />
-        ) : (
-          <LockedBody plan={plan} onUnlock={() => setOpen(true)} />
-        )}
-      </div>
+        <div className="relative z-10 flex-1 flex flex-col">
+          {plan.unlocked ? (
+            <UnlockedBody plan={plan} theme={theme} userName={userName}
+              onView={() => navigate(`/app/investments?plan=${plan.key}`)} onBuyMore={() => setOpen(true)} />
+          ) : (
+            <LockedBody plan={plan} onUnlock={() => setOpen(true)} />
+          )}
+        </div>
+      </motion.div>
 
       <BuyPlanDialog plan={plan} open={open} onOpenChange={setOpen} walletBalance={walletBalance} />
     </>
@@ -55,16 +87,27 @@ function LockedBody({ plan, onUnlock }) {
           <div>Expected profit {money(plan.profit_amount)}</div>
         </div>
       </div>
-      {/* Light-frost overlay + flat 2D yellow lock */}
-      <button
+      {/* Light-frost overlay + flat 2D yellow lock with Framer Motion hover scale */}
+      <motion.button
         onClick={onUnlock}
         data-testid={`dash-plan-unlock-${plan.key}`}
-        className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl border border-white/8 bg-white/[0.03] backdrop-blur-[3px] transition hover:bg-white/[0.06]"
+        whileHover={{
+          scale: 1.02,
+          backgroundColor: "rgba(255, 255, 255, 0.06)",
+        }}
+        whileTap={{ scale: 0.97 }}
+        transition={{ type: "spring", stiffness: 450, damping: 22 }}
+        className="group/lock absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl border border-white/8 bg-white/[0.03] backdrop-blur-[3px] transition-colors"
       >
-        <Lock className="h-11 w-11 text-yellow-400" strokeWidth={2.25} />
-        <span className="text-sm font-semibold text-white ex-display">Tap to unlock</span>
+        <motion.div
+          whileHover={{ scale: 1.15, rotate: -5 }}
+          transition={{ type: "spring", stiffness: 450, damping: 18 }}
+        >
+          <Lock className="h-11 w-11 text-yellow-400" strokeWidth={2.25} />
+        </motion.div>
+        <span className="text-sm font-semibold text-white ex-display group-hover/lock:translate-y-[-1px] transition-transform">Tap to unlock</span>
         <span className="text-xs text-ex-muted">Invest to reveal this plan</span>
-      </button>
+      </motion.button>
     </div>
   );
 }
@@ -85,12 +128,16 @@ function UnlockedBody({ plan, userName, onView, onBuyMore }) {
         <Stat label="Next maturity" value={plan.next_maturity ? dayjs(plan.next_maturity).format("DD MMM YYYY") : "—"} full />
       </div>
       <div className="mt-auto flex gap-2 pt-4">
-        <EasyXButton onClick={onView} data-testid={`dash-view-${plan.key}`} className="flex-1 h-9">
-          View Investments <ArrowRight className="ml-1 h-4 w-4" />
-        </EasyXButton>
-        <EasyXButton variant="ghost" onClick={onBuyMore} data-testid={`dash-buymore-${plan.key}`} className="h-9 px-3">
-          <Plus className="h-4 w-4" />
-        </EasyXButton>
+        <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="flex-1">
+          <EasyXButton onClick={onView} data-testid={`dash-view-${plan.key}`} className="w-full h-9">
+            View Investments <ArrowRight className="ml-1 h-4 w-4" />
+          </EasyXButton>
+        </motion.div>
+        <motion.div whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}>
+          <EasyXButton variant="ghost" onClick={onBuyMore} data-testid={`dash-buymore-${plan.key}`} className="h-9 px-3">
+            <Plus className="h-4 w-4" />
+          </EasyXButton>
+        </motion.div>
       </div>
     </div>
   );

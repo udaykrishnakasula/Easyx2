@@ -75,10 +75,12 @@ export default function RewardsFeed() {
   const seenIds = useRef(new Set());
   const initialized = useRef(false);
 
+  const feedList = Array.isArray(data) ? data : [];
+
   // Detect newly-arrived items across polls to briefly highlight them.
   useEffect(() => {
-    if (!data) return;
-    const currentIds = data.map((d) => d.id);
+    if (!Array.isArray(data)) return;
+    const currentIds = data.map((d) => d?.id).filter(Boolean);
     if (!initialized.current) {
       seenIds.current = new Set(currentIds);
       initialized.current = true;
@@ -119,7 +121,7 @@ export default function RewardsFeed() {
           </div>
         ) : isError ? (
           <EasyXEmptyState icon={Activity} title="Could not load activity" note="We'll retry automatically." />
-        ) : !data || data.length === 0 ? (
+        ) : !feedList || feedList.length === 0 ? (
           <EasyXEmptyState
             icon={Activity}
             title="No rewards yet"
@@ -128,7 +130,8 @@ export default function RewardsFeed() {
         ) : (
           <ul className="divide-y divide-white/5">
             <AnimatePresence initial={false}>
-              {data.map((item) => {
+              {feedList.map((item) => {
+                if (!item || !item.id) return null;
                 const meta = CATEGORY_META[item.category] || CATEGORY_META.other;
                 const Icon = iconFor(item);
                 const isFresh = freshIds.has(item.id);

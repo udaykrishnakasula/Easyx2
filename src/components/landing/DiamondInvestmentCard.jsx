@@ -432,7 +432,15 @@ function InvestmentCardBase({
         style={{ transformStyle: "preserve-3d" }}
         variants={floatVariants}
         animate={dragging ? "dragging" : "idle"}
-        whileHover={{ scale: 1.02 }}
+        whileHover={{
+          scale: 1.025,
+          y: -4,
+          transition: { type: "spring", stiffness: 380, damping: 22 },
+        }}
+        whileTap={{
+          scale: 0.985,
+          transition: { type: "spring", stiffness: 450, damping: 25 },
+        }}
       >
         {/* Soft breathing outer glow */}
         <motion.div
@@ -440,6 +448,7 @@ function InvestmentCardBase({
           className="pointer-events-none absolute -inset-6 rounded-[36px]"
           style={{ background: theme.glow, filter: "blur(28px)" }}
           animate={{ opacity: [0.45, 0.85, 0.45] }}
+          whileHover={{ opacity: 0.9, filter: "blur(32px)" }}
           transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
         />
 

@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from "react";
 import Autoplay from "embla-carousel-autoplay";
 import { Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
 
 import {
   Carousel,
@@ -177,8 +178,13 @@ export default function DashboardPlanCarousel({ plans, walletBalance, userName }
                     transitionDelay: `${idx * 100 + 80}ms`,
                   }}
                 >
-                  {/* 3D certificate card (same component as the landing carousel) */}
-                  <div className="relative w-[420px] max-w-[82vw] transition-transform duration-300 ease-out hover:-translate-y-1">
+                  {/* 3D certificate card with Framer Motion hover scale and smooth spring transition */}
+                  <motion.div
+                    whileHover={{ scale: 1.028, y: -6 }}
+                    whileTap={{ scale: 0.985 }}
+                    transition={{ type: "spring", stiffness: 380, damping: 24 }}
+                    className="relative w-[420px] max-w-[82vw] cursor-pointer"
+                  >
                     <InvestmentCard
                       variant={key}
                       plan={plan}
@@ -188,20 +194,39 @@ export default function DashboardPlanCarousel({ plans, walletBalance, userName }
                     />
 
                     {!plan.unlocked && (
-                      <button
+                      <motion.button
                         onClick={() => setBuyPlan(plan)}
                         data-testid={`dash-plan-unlock-${key}`}
-                        className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-[28px] bg-black/25 backdrop-blur-[3px] transition-colors duration-200 hover:bg-black/35"
+                        whileHover={{
+                          backgroundColor: "rgba(0, 0, 0, 0.42)",
+                          backdropFilter: "blur(2px)",
+                        }}
+                        whileTap={{ scale: 0.97 }}
+                        transition={{ duration: 0.2 }}
+                        className="group/lock absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-[28px] bg-black/30 backdrop-blur-[3px] transition-colors"
                       >
-                        <Lock className="h-12 w-12 text-yellow-400" strokeWidth={2.25} />
-                        <span className="ex-display text-base font-semibold text-white">Tap to unlock</span>
+                        <motion.div
+                          whileHover={{ scale: 1.15, rotate: -6 }}
+                          transition={{ type: "spring", stiffness: 450, damping: 18 }}
+                        >
+                          <Lock className="h-12 w-12 text-yellow-400 transition-transform duration-300 group-hover/lock:scale-110 group-hover/lock:rotate-[-6deg]" strokeWidth={2.25} />
+                        </motion.div>
+                        <span className="ex-display text-base font-semibold text-white transition-transform duration-300 group-hover/lock:translate-y-[-2px]">Tap to unlock</span>
                         <span className="text-xs text-white/70">Invest to reveal this plan</span>
-                      </button>
+                      </motion.button>
                     )}
-                  </div>
+                  </motion.div>
 
-                  {/* Real plan action bar */}
-                  <div className="mt-4 w-[420px] max-w-[82vw] ex-surface-sm p-3 flex items-center justify-between gap-3 transition-colors duration-200">
+                  {/* Real plan action bar with smooth hover lift */}
+                  <motion.div
+                    whileHover={{
+                      scale: 1.018,
+                      y: -2,
+                      boxShadow: "0 12px 30px -10px rgba(0,0,0,0.5)",
+                    }}
+                    transition={{ type: "spring", stiffness: 400, damping: 25 }}
+                    className="mt-4 w-[420px] max-w-[82vw] ex-surface-sm p-3 flex items-center justify-between gap-3 border border-white/10 transition-colors duration-300 hover:border-white/25"
+                  >
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="ex-eyebrow truncate">{plan.name}</span>
                       <EasyXStatusBadge status={plan.unlocked ? "unlocked" : "locked"} />
@@ -211,16 +236,20 @@ export default function DashboardPlanCarousel({ plans, walletBalance, userName }
                     </div>
                     {plan.unlocked ? (
                       <div className="flex gap-2 shrink-0">
-                        <EasyXButton variant="ghost" className="h-9 px-3" onClick={() => setBuyPlan(plan)} data-testid={`dash-buymore-${key}`}>
-                          BUY
-                        </EasyXButton>
+                        <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                          <EasyXButton variant="ghost" className="h-9 px-3" onClick={() => setBuyPlan(plan)} data-testid={`dash-buymore-${key}`}>
+                            BUY
+                          </EasyXButton>
+                        </motion.div>
                       </div>
                     ) : (
-                      <EasyXButton className="h-9 px-4 shrink-0" onClick={() => setBuyPlan(plan)} data-testid={`dash-buy-${key}`}>
-                        Buy {money(plan.price)}
-                      </EasyXButton>
+                      <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.95 }}>
+                        <EasyXButton className="h-9 px-4 shrink-0" onClick={() => setBuyPlan(plan)} data-testid={`dash-buy-${key}`}>
+                          Buy {money(plan.price)}
+                        </EasyXButton>
+                      </motion.div>
                     )}
-                  </div>
+                  </motion.div>
                 </div>
               </CarouselItem>
             );

@@ -32,6 +32,10 @@ export default function AdminReferralsPage() {
   const { data, isLoading } = useAdminReferrals();
   const [tab, setTab] = useState("commissions");
 
+  const stats = data?.stats || {};
+  const commissions = Array.isArray(data?.commissions) ? data.commissions : [];
+  const relationships = Array.isArray(data?.relationships) ? data.relationships : [];
+
   return (
     <div data-testid="admin-referrals-page">
       <PageHeading title="Referrals" subtitle="Every direct referral relationship and commission paid across the platform." icon={Share2} />
@@ -41,10 +45,10 @@ export default function AdminReferralsPage() {
       ) : (
         <>
           <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <EasyXStat label="Relationships" value={data.stats.total_relationships} icon={GitBranch} />
-            <EasyXStat label="Referrers" value={data.stats.total_referrers} icon={Users} />
-            <EasyXStat label="Commissions paid" value={data.stats.total_commissions_paid} icon={DollarSign} />
-            <EasyXStat label="Total paid" value={money(data.stats.total_commission_amount)} icon={DollarSign} accent />
+            <EasyXStat label="Relationships" value={stats.total_relationships || 0} icon={GitBranch} />
+            <EasyXStat label="Referrers" value={stats.total_referrers || 0} icon={Users} />
+            <EasyXStat label="Commissions paid" value={stats.total_commissions_paid || 0} icon={DollarSign} />
+            <EasyXStat label="Total paid" value={money(stats.total_commission_amount || 0)} icon={DollarSign} accent />
           </div>
 
           <div className="mt-5 inline-flex rounded-ex-ctrl bg-white/5 p-1">
@@ -64,7 +68,7 @@ export default function AdminReferralsPage() {
 
           {tab === "commissions" ? (
             <EasyXCard className="mt-4 p-0 overflow-hidden">
-              {data.commissions.length === 0 ? (
+              {commissions.length === 0 ? (
                 <div className="p-8"><EasyXEmptyState icon={DollarSign} title="No commissions yet" note="Commissions appear when referred users invest." /></div>
               ) : (
                 <div className="overflow-x-auto">
@@ -80,7 +84,7 @@ export default function AdminReferralsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
-                      {data.commissions.map((c) => (
+                      {commissions.map((c) => (
                         <tr key={c.id} className="hover:bg-white/[0.02]">
                           <td className="px-4 py-3"><Person p={c.referrer} /></td>
                           <td className="px-4 py-3"><Person p={c.referee} /></td>
@@ -97,11 +101,11 @@ export default function AdminReferralsPage() {
             </EasyXCard>
           ) : (
             <EasyXCard className="mt-4 p-0 overflow-hidden">
-              {data.relationships.length === 0 ? (
+              {relationships.length === 0 ? (
                 <div className="p-8"><EasyXEmptyState icon={GitBranch} title="No relationships yet" note="Direct referral relationships appear here." /></div>
               ) : (
                 <div className="divide-y divide-white/5" data-testid="admin-ref-relationships">
-                  {data.relationships.map((r, i) => (
+                  {relationships.map((r, i) => (
                     <div key={i} className="flex flex-wrap items-center gap-3 px-4 py-3">
                       <Person p={r.referrer} />
                       <ArrowRight className="h-4 w-4 text-ex-lav-300 shrink-0" />

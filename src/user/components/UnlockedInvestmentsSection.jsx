@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import dayjs from "dayjs";
+import { motion } from "framer-motion";
 import {
   Sparkles,
   ShieldCheck,
@@ -56,18 +57,27 @@ const UnlockedCardItem = React.memo(function UnlockedCardItem({
         transitionDelay: `${(cardIdx % 4) * 100 + 100}ms`,
       }}
     >
-      {/* 3D Certificate Card */}
-      <div className="relative w-full transition-transform duration-300 ease-out group-hover/card:-translate-y-1">
+      {/* 3D Certificate Card with Framer Motion hover scale */}
+      <motion.div
+        whileHover={{ scale: 1.025, y: -5 }}
+        whileTap={{ scale: 0.985 }}
+        transition={{ type: "spring", stiffness: 380, damping: 24 }}
+        className="relative w-full cursor-pointer"
+      >
         <InvestmentCard
           variant={planKey}
           investment={inv}
           userName={userName}
           className="mx-auto w-full"
         />
-      </div>
+      </motion.div>
 
       {/* Dynamic Details & Actions Bar */}
-      <div className="mt-3.5 w-full ex-surface-sm p-4 rounded-2xl border border-white/10 bg-[#121118]/80 backdrop-blur-md shadow-xl">
+      <motion.div
+        whileHover={{ scale: 1.015, y: -2 }}
+        transition={{ type: "spring", stiffness: 400, damping: 25 }}
+        className="mt-3.5 w-full ex-surface-sm p-4 rounded-2xl border border-white/10 bg-[#121118]/80 backdrop-blur-md shadow-xl transition-colors hover:border-white/20"
+      >
         {/* Top Bar: Plan Title + Sequence # + Status + Unique ID */}
         <div className="flex items-center justify-between gap-2 border-b border-white/8 pb-3">
           <div className="flex items-center gap-2 min-w-0">
@@ -137,7 +147,7 @@ const UnlockedCardItem = React.memo(function UnlockedCardItem({
             Tap card above to 3D flip
           </span>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 });
