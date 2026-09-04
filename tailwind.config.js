@@ -36,6 +36,7 @@ export default {
       },
       colors: {
         ex: {
+          bg: '#0c0c0f',
           ink: '#0c0c0f',
           surface: '#17161d',
           surface2: '#121118',

@@ -22,10 +22,10 @@ export default function CameraAccessModal({
   isOpen,
   onAllow,
   onDeny,
-  title = "Camera Access Required",
-  description = "EasyX needs access to your device camera to capture your live selfie for KYC verification. Your camera will only be accessed when you choose to take your selfie.",
-  allowButtonText = "Allow Camera on This Site",
-  denyButtonText = "Never Allow",
+  title = "Camera access request",
+  description = "This app requests access to Camera to capture your live identity selfie for KYC verification. Your camera will only be active when you choose to take your selfie.",
+  allowButtonText = "Allow Camera access",
+  denyButtonText = "Disallow",
 }: CameraAccessModalProps) {
   if (!isOpen) return null;
 

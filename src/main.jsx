@@ -9,6 +9,7 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 60_000,
       refetchOnWindowFocus: false,
+      refetchIntervalInBackground: false,
       retry: (failureCount, error) => {
         // Never retry client-side 4xx errors
         if (error?.response?.status >= 400 && error?.response?.status < 500) {

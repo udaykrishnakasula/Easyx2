@@ -63,6 +63,7 @@ export function AnalyticsProvider({ children }) {
     return () => {
       api.interceptors.request.eject(requestInterceptor);
       api.interceptors.response.eject(responseInterceptor);
+      behaviourTracker.cleanup();
     };
   }, []);
 

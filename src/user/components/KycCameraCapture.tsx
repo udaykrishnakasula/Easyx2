@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   Camera,
   CheckCircle2,
@@ -11,9 +11,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { EasyXButton } from "@/design/EasyX";
+import CameraAccessModal from "./CameraAccessModal";
 
 export type KycCameraStatus =
   | "IDLE"
+  | "CHECKING_PERMISSION"
+  | "REQUESTING_PERMISSION"
   | "INITIALIZING"
   | "CAMERA_ACTIVE"
   | "CAPTURED"
@@ -30,6 +33,9 @@ interface KycCameraCaptureProps {
   disabled?: boolean;
 }
 
+/**
+ * Robust error classifier for standard W3C MediaStream and browser permission errors
+ */
 function classifyCameraError(err: any): {
   status: KycCameraStatus;
   message: string;
@@ -37,7 +43,7 @@ function classifyCameraError(err: any): {
   const name = err?.name || "";
   const msg = String(err?.message || "").toLowerCase();
 
-  // 1. Permission Denied / Blocked
+  // 1. Permission Denied / Blocked / Dismissed
   if (
     name === "NotAllowedError" ||
     name === "PermissionDeniedError" ||
@@ -49,7 +55,7 @@ function classifyCameraError(err: any): {
     return {
       status: "PERMISSION_DENIED",
       message:
-        "Camera access is blocked or was previously denied. Please enable camera permission in your browser URL bar / site settings and try again.",
+        "Camera access is blocked or was denied. Please allow camera permission in your browser address bar / site settings and tap Try Again.",
     };
   }
 
@@ -64,7 +70,7 @@ function classifyCameraError(err: any): {
     return {
       status: "CAMERA_UNAVAILABLE",
       message:
-        "No camera detected on this device. Please connect a webcam or open EasyX on a smartphone with a camera.",
+        "No camera detected on this device. Please connect a camera or open EasyX on a smartphone with a front camera.",
     };
   }
 
@@ -84,7 +90,23 @@ function classifyCameraError(err: any): {
     };
   }
 
-  // 4. Unsupported Browser / Insecure Context
+  // 4. Overconstrained / Resolution mismatch
+  if (name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError") {
+    return {
+      status: "CAMERA_ERROR",
+      message: "The requested camera resolution or facing mode is not supported by your camera hardware.",
+    };
+  }
+
+  // 5. Aborted
+  if (name === "AbortError") {
+    return {
+      status: "CAMERA_ERROR",
+      message: "Camera initialization was interrupted. Please try again.",
+    };
+  }
+
+  // 6. Unsupported Browser / Insecure Context
   if (
     name === "BrowserNotSupportedError" ||
     name === "InsecureContextError" ||
@@ -94,11 +116,11 @@ function classifyCameraError(err: any): {
     return {
       status: "BROWSER_UNSUPPORTED",
       message:
-        "Direct camera access is not supported on this browser or requires a secure HTTPS connection. Please open EasyX in Google Chrome, Safari, or Microsoft Edge.",
+        "Direct camera access is not supported on this browser or requires a secure HTTPS connection. Please open EasyX in Google Chrome, Safari, or Edge.",
     };
   }
 
-  // 5. Fallback generic error
+  // 7. Fallback generic error
   return {
     status: "CAMERA_ERROR",
     message: err?.message || "Failed to start camera. Please check your browser settings and try again.",
@@ -106,8 +128,24 @@ function classifyCameraError(err: any): {
 }
 
 /**
- * Intelligent MediaStream retriever with tiered device constraints
- * Specifically optimizes for front-facing 'user' selfie mode or rear 'environment' mode on mobile.
+ * Checks system/browser permission state without prompting
+ */
+async function queryBrowserCameraPermission(): Promise<"granted" | "denied" | "prompt" | "unsupported"> {
+  if (typeof navigator === "undefined" || !navigator.permissions?.query) {
+    return "unsupported";
+  }
+  try {
+    const status = await navigator.permissions.query({ name: "camera" as PermissionName });
+    return status.state;
+  } catch {
+    // Some browsers (e.g. Firefox or Safari) may reject query for 'camera'
+    return "unsupported";
+  }
+}
+
+/**
+ * MediaStream retriever with tiered device constraints
+ * Optimizes for front-facing 'user' selfie mode or rear 'environment' mode.
  */
 const getCameraStream = async (targetFacingMode: CameraFacingMode = "user"): Promise<MediaStream> => {
   const mediaDevices = typeof navigator !== "undefined" ? navigator.mediaDevices : null;
@@ -151,7 +189,7 @@ const getCameraStream = async (targetFacingMode: CameraFacingMode = "user"): Pro
       throw err1;
     }
 
-    // Tier 2: Plain facingMode
+    // Tier 2: Plain facingMode without explicit resolution
     try {
       return await mediaDevices.getUserMedia({
         video: {
@@ -184,6 +222,8 @@ export default function KycCameraCapture({
 }: KycCameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const isStartingRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   const [status, setStatus] = useState<KycCameraStatus>("IDLE");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -191,26 +231,10 @@ export default function KycCameraCapture({
   const [isProcessing, setIsProcessing] = useState(false);
   const [facingMode, setFacingMode] = useState<CameraFacingMode>("user");
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  const [showConsentModal, setShowConsentModal] = useState(false);
 
-  // Check for multi-camera support (e.g. front and back cameras on smartphones)
-  useEffect(() => {
-    if (typeof navigator !== "undefined" && navigator.mediaDevices?.enumerateDevices) {
-      navigator.mediaDevices
-        .enumerateDevices()
-        .then((devices) => {
-          const videoInputs = devices.filter((d) => d.kind === "videoinput");
-          if (videoInputs.length > 1) {
-            setHasMultipleCameras(true);
-          }
-        })
-        .catch(() => {
-          // ignore device enumeration errors
-        });
-    }
-  }, []);
-
-  // Stop camera stream tracks and clear video source
-  const stopCameraStream = () => {
+  // Safely stop all active camera stream tracks
+  const stopCameraStream = useCallback(() => {
     if (streamRef.current) {
       try {
         const tracks = streamRef.current.getTracks();
@@ -233,20 +257,65 @@ export default function KycCameraCapture({
         // ignore
       }
     }
-  };
+  }, []);
 
-  // Clean up camera stream and object URLs on unmount
+  // Cleanup on unmount
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       stopCameraStream();
       if (capturedPreview && capturedPreview.startsWith("blob:")) {
         URL.revokeObjectURL(capturedPreview);
       }
     };
-  }, [capturedPreview]);
+  }, [stopCameraStream, capturedPreview]);
 
-  // Request camera from browser and start live stream immediately
-  const startCameraStream = async (targetMode: CameraFacingMode = facingMode) => {
+  // Listen to browser permission state changes (reactive if user changes site settings)
+  useEffect(() => {
+    let permStatus: PermissionStatus | null = null;
+    if (typeof navigator !== "undefined" && navigator.permissions?.query) {
+      navigator.permissions
+        .query({ name: "camera" as PermissionName })
+        .then((s) => {
+          permStatus = s;
+          const handleChange = () => {
+            if (!isMountedRef.current) return;
+            if (s.state === "granted" && status === "PERMISSION_DENIED") {
+              setStatus("IDLE");
+              setErrorMessage(null);
+            } else if (s.state === "denied" && status === "CAMERA_ACTIVE") {
+              stopCameraStream();
+              setStatus("PERMISSION_DENIED");
+              setErrorMessage("Camera access was revoked in browser settings.");
+            }
+          };
+          s.addEventListener("change", handleChange);
+        })
+        .catch(() => {
+          // ignore permission query errors
+        });
+    }
+
+    return () => {
+      if (permStatus) {
+        try {
+          permStatus.removeEventListener("change", () => {});
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [status, stopCameraStream]);
+
+  /**
+   * Internal routine to invoke getUserMedia and bind to the video element.
+   * Concurrency-guarded by isStartingRef.
+   */
+  const executeStartCamera = async (targetMode: CameraFacingMode = facingMode) => {
+    if (isStartingRef.current) return;
+    isStartingRef.current = true;
+
     try {
       setErrorMessage(null);
       setStatus("INITIALIZING");
@@ -254,13 +323,33 @@ export default function KycCameraCapture({
 
       const stream = await getCameraStream(targetMode);
 
+      if (!isMountedRef.current) {
+        // Component unmounted while awaiting stream
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
       streamRef.current = stream;
       setFacingMode(targetMode);
       setStatus("CAMERA_ACTIVE");
 
-      // Attach stream to video element with mobile compatibility attributes
+      // Check device count ONLY after camera access has been granted (never on mount)
+      if (navigator.mediaDevices?.enumerateDevices) {
+        navigator.mediaDevices
+          .enumerateDevices()
+          .then((devices) => {
+            if (!isMountedRef.current) return;
+            const videoInputs = devices.filter((d) => d.kind === "videoinput");
+            if (videoInputs.length > 1) {
+              setHasMultipleCameras(true);
+            }
+          })
+          .catch(() => {});
+      }
+
+      // Attach stream to video element
       setTimeout(() => {
-        if (videoRef.current) {
+        if (videoRef.current && isMountedRef.current) {
           const video = videoRef.current;
           video.srcObject = stream;
           video.setAttribute("playsinline", "true");
@@ -272,43 +361,91 @@ export default function KycCameraCapture({
           if (playPromise !== undefined) {
             playPromise.catch((err) => {
               console.warn("Autoplay promise notice:", err);
-              video.onloadedmetadata = () => {
-                video.play().catch((e) => console.warn("Retry play error:", e));
-              };
+              if (videoRef.current) {
+                videoRef.current.onloadedmetadata = () => {
+                  videoRef.current?.play().catch((e) => console.warn("Retry play error:", e));
+                };
+              }
             });
           }
         }
-      }, 60);
+      }, 50);
     } catch (err: any) {
       console.warn("Camera access error:", err);
       stopCameraStream();
+      if (!isMountedRef.current) return;
       const classified = classifyCameraError(err);
       setStatus(classified.status);
       setErrorMessage(classified.message);
+    } finally {
+      isStartingRef.current = false;
     }
   };
 
-  // User taps "Open Camera & Take Photo"
-  const handleOpenClick = () => {
-    if (disabled) return;
+  /**
+   * Explicit user-initiated click on "Open Camera & Take Photo".
+   * Checks browser permission state first:
+   * - If already 'granted': start camera directly (no dialog)
+   * - If 'denied': show instructions banner immediately (no dialog)
+   * - If 'prompt' or unsupported: display EasyX camera consent explanation once
+   */
+  const handleOpenClick = async () => {
+    if (disabled || isStartingRef.current) return;
     setErrorMessage(null);
+
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setStatus("BROWSER_UNSUPPORTED");
-      setErrorMessage("Live camera access is not supported by your browser. Please use a modern browser such as Chrome, Safari, or Edge to capture your live selfie.");
+      setErrorMessage(
+        "Live camera access is not supported by your browser. Please use a modern browser such as Chrome, Safari, or Edge to capture your live selfie."
+      );
       return;
     }
-    startCameraStream(facingMode);
+
+    setStatus("CHECKING_PERMISSION");
+    const perm = await queryBrowserCameraPermission();
+
+    if (perm === "granted") {
+      // Permission already granted — start camera directly
+      await executeStartCamera(facingMode);
+    } else if (perm === "denied") {
+      // Permission explicitly denied — show blocked guidance
+      setStatus("PERMISSION_DENIED");
+      setErrorMessage(
+        "Camera access is blocked in your browser settings. Please enable camera permission in your address bar and tap Try Again."
+      );
+    } else {
+      // Undecided / prompt state — present the custom consent UI once
+      setShowConsentModal(true);
+    }
+  };
+
+  /**
+   * User explicitly clicks "Allow Camera access" in the EasyX custom consent modal
+   */
+  const handleConsentAllow = async () => {
+    setShowConsentModal(false);
+    setStatus("REQUESTING_PERMISSION");
+    await executeStartCamera(facingMode);
+  };
+
+  /**
+   * User clicks "Disallow" or closes the consent modal
+   */
+  const handleConsentDeny = () => {
+    setShowConsentModal(false);
+    setStatus("IDLE");
   };
 
   // Toggle between Front ('user') and Rear ('environment') cameras
   const handleToggleFacingMode = async () => {
+    if (isStartingRef.current) return;
     const nextMode: CameraFacingMode = facingMode === "user" ? "environment" : "user";
-    await startCameraStream(nextMode);
+    await executeStartCamera(nextMode);
   };
 
   // Capture frame from live video
   const handleCapturePhoto = async () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || isProcessing) return;
 
     try {
       setIsProcessing(true);
@@ -353,7 +490,7 @@ export default function KycCameraCapture({
           toast.success("Live identity selfie captured successfully!");
         },
         "image/jpeg",
-        0.82
+        0.85
       );
     } catch (err: any) {
       setIsProcessing(false);
@@ -379,6 +516,13 @@ export default function KycCameraCapture({
 
   return (
     <div className="space-y-3" data-testid="kyc-camera-capture-container">
+      {/* Custom Consent Modal: only displays when user taps Open Camera AND permission is undecided */}
+      <CameraAccessModal
+        isOpen={showConsentModal}
+        onAllow={handleConsentAllow}
+        onDeny={handleConsentDeny}
+      />
+
       <div className="flex items-center justify-between">
         <label className="text-xs font-semibold text-ex-text flex items-center gap-1.5">
           <Camera className="h-4 w-4 text-ex-lav-300" />
@@ -394,7 +538,7 @@ export default function KycCameraCapture({
       </div>
 
       {/* State 1: IDLE - Camera permission not yet requested */}
-      {status === "IDLE" && (
+      {(status === "IDLE" || status === "CHECKING_PERMISSION") && (
         <div
           className="rounded-ex border border-dashed border-white/15 bg-white/[0.02] p-5 text-center transition hover:border-ex-accent/50"
           data-testid="kyc-camera-idle"
@@ -412,18 +556,19 @@ export default function KycCameraCapture({
               type="button"
               variant="accent"
               onClick={handleOpenClick}
-              disabled={disabled}
+              disabled={disabled || status === "CHECKING_PERMISSION"}
               data-testid="btn-open-camera"
               className="px-6 py-2.5 text-xs font-bold shadow-lg shadow-purple-950/40"
             >
-              <Camera className="mr-2 h-4 w-4" /> Open Camera &amp; Take Photo
+              <Camera className="mr-2 h-4 w-4" />
+              {status === "CHECKING_PERMISSION" ? "Checking Permission..." : "Open Camera & Take Photo"}
             </EasyXButton>
           </div>
         </div>
       )}
 
-      {/* State 2: INITIALIZING - Requesting browser camera permission */}
-      {status === "INITIALIZING" && (
+      {/* State 2: INITIALIZING / REQUESTING PERMISSION */}
+      {(status === "INITIALIZING" || status === "REQUESTING_PERMISSION") && (
         <div
           className="rounded-ex border border-white/10 bg-white/[0.03] p-8 text-center"
           data-testid="kyc-camera-initializing"
@@ -464,16 +609,18 @@ export default function KycCameraCapture({
             </div>
 
             {/* Flip / Switch Camera Button overlay (when multiple cameras or mobile available) */}
-            <button
-              type="button"
-              onClick={handleToggleFacingMode}
-              className="absolute top-3 right-3 z-10 p-2 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white border border-white/20 transition flex items-center gap-1 text-[11px] font-medium shadow-lg"
-              title={`Switch to ${facingMode === "user" ? "Rear" : "Front"} Camera`}
-              data-testid="btn-switch-camera"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{facingMode === "user" ? "Rear Camera" : "Front Camera"}</span>
-            </button>
+            {hasMultipleCameras && (
+              <button
+                type="button"
+                onClick={handleToggleFacingMode}
+                className="absolute top-3 right-3 z-10 p-2 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white border border-white/20 transition flex items-center gap-1 text-[11px] font-medium shadow-lg"
+                title={`Switch to ${facingMode === "user" ? "Rear" : "Front"} Camera`}
+                data-testid="btn-switch-camera"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{facingMode === "user" ? "Rear Camera" : "Front Camera"}</span>
+              </button>
+            )}
           </div>
 
           {/* Action Bar */}
@@ -566,16 +713,16 @@ export default function KycCameraCapture({
               </h4>
               <p className="text-xs text-amber-200/90 leading-relaxed">
                 {errorMessage ||
-                  "Camera access is blocked or was previously denied. Please enable camera permission in your browser URL bar / site settings and try again."}
+                  "Camera access is blocked or was previously denied. Please enable camera permission in your browser settings and try again."}
               </p>
 
               {/* Step by step fix instructions */}
               <div className="rounded bg-black/30 p-2.5 text-[11px] text-amber-200/80 space-y-1.5 border border-amber-500/20">
                 <div className="font-semibold text-amber-100">How to enable camera permissions:</div>
                 <ol className="list-decimal list-inside space-y-1 text-white/80">
-                  <li>Click the <strong>Lock / Settings icon (🔒 or 🎛️)</strong> on the left side of your browser address bar.</li>
-                  <li>Set <strong>Camera</strong> permission to <strong>&ldquo;Allow&rdquo;</strong> (or Reset permissions).</li>
-                  <li>Click <strong>&ldquo;Try Again&rdquo;</strong> below or refresh the page.</li>
+                  <li>Tap the <strong>tune/lock icon (🔒 or 🎛️)</strong> on the left of your browser address bar.</li>
+                  <li>Tap <strong>Permissions</strong> → set <strong>Camera</strong> to <strong>&ldquo;Allow&rdquo;</strong>.</li>
+                  <li>Click <strong>&ldquo;Try Again&rdquo;</strong> below.</li>
                 </ol>
               </div>
             </div>
@@ -585,7 +732,7 @@ export default function KycCameraCapture({
             <EasyXButton
               type="button"
               variant="accent"
-              onClick={() => startCameraStream(facingMode)}
+              onClick={handleOpenClick}
               data-testid="btn-retry-open-camera"
               className="text-xs font-semibold h-8 px-4"
             >
@@ -595,7 +742,7 @@ export default function KycCameraCapture({
         </div>
       )}
 
-      {/* State 6: CAMERA UNAVAILABLE - Hardware missing or locked by other app */}
+      {/* State 6: CAMERA UNAVAILABLE */}
       {status === "CAMERA_UNAVAILABLE" && (
         <div
           className="rounded-ex border border-amber-500/30 bg-amber-500/10 p-4 space-y-3"
@@ -616,7 +763,7 @@ export default function KycCameraCapture({
             <EasyXButton
               type="button"
               variant="accent"
-              onClick={() => startCameraStream(facingMode)}
+              onClick={handleOpenClick}
               data-testid="btn-retry-open-camera"
               className="text-xs font-semibold h-8 px-4"
             >
@@ -648,7 +795,7 @@ export default function KycCameraCapture({
             <EasyXButton
               type="button"
               variant="accent"
-              onClick={() => startCameraStream(facingMode)}
+              onClick={handleOpenClick}
               data-testid="btn-retry-open-camera"
               className="text-xs font-semibold h-8 px-4"
             >
@@ -660,5 +807,3 @@ export default function KycCameraCapture({
     </div>
   );
 }
-
-

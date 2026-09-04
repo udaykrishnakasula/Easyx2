@@ -94,7 +94,10 @@ export default function AppLogo({
   const [imgError, setImgError] = useState(false);
 
   const activeName = customName || branding?.app_name || "EasyX";
-  const activeIconUrl = customIconUrl !== undefined ? customIconUrl : branding?.app_icon_url;
+  const activeIconUrl =
+    customIconUrl !== undefined
+      ? customIconUrl
+      : branding?.app_icon_url || "/uploads/branding/brand_1788453379866_40p372p.png";
   const activeShape = shape || branding?.icon_shape || "rounded";
   const activePresetId = customPreset || branding?.icon_preset || "default";
 

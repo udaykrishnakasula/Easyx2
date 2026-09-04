@@ -245,6 +245,24 @@ body {
   color: #fff;
   display: grid;
   place-items: center;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.nav__mark img,
+.nav__icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: inherit;
+}
+.nav__fallback-mark {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
 }
 .nav__name {
   font-family: "Bricolage Grotesque", sans-serif;

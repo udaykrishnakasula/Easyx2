@@ -214,7 +214,7 @@ export function useRealtimeNotifications() {
 
     // Reconnection & Synchronization on tab focus or network recovery
     const handleVisibilityOrOnline = () => {
-      if (document.visibilityState === "visible" || navigator.onLine) {
+      if (document.visibilityState === "visible" && navigator.onLine) {
         // 1. Ensure stream is active
         if (!eventSourceRef.current || eventSourceRef.current.readyState === EventSource.CLOSED) {
           connectSSE();
@@ -224,6 +224,13 @@ export function useRealtimeNotifications() {
         queryClient.invalidateQueries({ queryKey: ["notifications"] });
         if (user.role === "admin") {
           queryClient.invalidateQueries({ queryKey: ["admin-notification-logs"] });
+        }
+      } else if (document.visibilityState === "hidden") {
+        // Conserve resources while tab is backgrounded: stop background reconnect loop and close SSE
+        clearTimeout(reconnectTimeoutRef.current);
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
         }
       }
     };

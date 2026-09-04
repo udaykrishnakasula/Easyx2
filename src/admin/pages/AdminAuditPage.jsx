@@ -665,7 +665,7 @@ export default function AdminAuditPage() {
                               {log.actor_name || "Platform Admin"}
                             </div>
                             <div className="text-[11px] text-white/50 font-mono">
-                              {log.actor_email || "subamcollection@gmail.com"}
+                              {log.actor_email || "admin@easyx.com"}
                             </div>
                           </div>
                         </div>
@@ -844,7 +844,7 @@ export default function AdminAuditPage() {
               <div className="rounded-lg border border-white/5 bg-white/2 p-3">
                 <div className="text-white/40 text-[11px] mb-1">Admin Actor</div>
                 <div className="font-semibold text-white truncate" title={selectedLog.actor_email}>
-                  {selectedLog.actor_email || "subamcollection@gmail.com"}
+                  {selectedLog.actor_email || "admin@easyx.com"}
                 </div>
               </div>
 

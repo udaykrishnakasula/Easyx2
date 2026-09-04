@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useEffect } from "react";
 import { useAppBranding } from "@/admin/adminApi";
 
+const DEFAULT_APP_ICON = "/uploads/branding/brand_1788453379866_40p372p.png";
+
 const BrandingContext = createContext({
   branding: null,
   appName: "EasyX",
   appTagline: "High-Yield Wealth Management",
-  appIconUrl: "",
-  faviconUrl: "",
+  appIconUrl: DEFAULT_APP_ICON,
+  faviconUrl: DEFAULT_APP_ICON,
   iconShape: "rounded",
   iconPreset: "default",
 });
@@ -16,8 +18,8 @@ export function BrandingProvider({ children }) {
 
   const appName = branding?.app_name || "EasyX";
   const appTagline = branding?.app_tagline || "High-Yield Wealth Management";
-  const appIconUrl = branding?.app_icon_url || "";
-  const faviconUrl = branding?.favicon_url || branding?.app_icon_url || "";
+  const appIconUrl = branding?.app_icon_url || DEFAULT_APP_ICON;
+  const faviconUrl = branding?.favicon_url || branding?.app_icon_url || DEFAULT_APP_ICON;
   const iconShape = branding?.icon_shape || "rounded";
   const iconPreset = branding?.icon_preset || "default";
 

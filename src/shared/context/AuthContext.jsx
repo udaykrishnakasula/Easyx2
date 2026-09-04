@@ -132,6 +132,9 @@ export function AuthProvider({ children }) {
       setCachedUser(data.user);
       setUser(data.user);
       setAuthState(AUTH_STATE.AUTHENTICATED);
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("easyx_recovery_session");
+      }
       authDiagnostics.logTransition(AUTH_TRANSITION.AUTHENTICATED, {
         userId: data.user?.id,
         role: data.user?.role,
@@ -152,6 +155,9 @@ export function AuthProvider({ children }) {
       setCachedUser(data.user);
       setUser(data.user);
       setAuthState(AUTH_STATE.AUTHENTICATED);
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("easyx_recovery_session");
+      }
       authDiagnostics.logTransition(AUTH_TRANSITION.AUTHENTICATED, {
         userId: data.user?.id,
         role: data.user?.role,
@@ -176,6 +182,9 @@ export function AuthProvider({ children }) {
       setCachedUser(null);
       setUser(null);
       setAuthState(AUTH_STATE.UNAUTHENTICATED);
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.removeItem("easyx_recovery_session");
+      }
     }
   }, [user]);
 

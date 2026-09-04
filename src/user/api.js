@@ -40,8 +40,8 @@ export function useRewardsFeed() {
   return useQuery({
     queryKey: ["rewards-feed"],
     queryFn: async () => (await api.get("/rewards/feed", { params: { limit: 30 } })).data,
-    refetchInterval: 8000, // near real-time polling
-    refetchIntervalInBackground: true,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -132,7 +132,7 @@ export function useUnreadCount() {
     },
     enabled: !!token,
     refetchInterval: token ? 30000 : false,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
     initialData: 0,
   });
 }

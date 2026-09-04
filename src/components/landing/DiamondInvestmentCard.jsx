@@ -74,37 +74,39 @@ function CardFace({ children, back = false, theme }) {
         transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
       />
 
-      {/* Sparkle points */}
-      {[
-        { top: "14%", left: "22%", d: 0 },
-        { top: "32%", left: "78%", d: 1.1 },
-        { top: "58%", left: "18%", d: 2.2 },
-        { top: "72%", left: "62%", d: 0.6 },
-        { top: "22%", left: "54%", d: 1.7 },
-        { top: "82%", left: "88%", d: 2.8 },
-      ].map((s, i) => (
-        <motion.span
-          key={i}
-          aria-hidden
-          className="pointer-events-none absolute rounded-full"
-          style={{
-            top: s.top,
-            left: s.left,
-            width: 3,
-            height: 3,
-            background: theme.sparkleBackground,
-            boxShadow: theme.sparkleShadow,
-            mixBlendMode: "screen",
-          }}
-          animate={{ opacity: [0.15, 1, 0.15], scale: [0.7, 1.3, 0.7] }}
-          transition={{
-            duration: 2.6 + (i % 3) * 0.6,
-            repeat: Infinity,
-            delay: s.d,
-            ease: "easeInOut",
-          }}
-        />
-      ))}
+      {/* Sparkle points — rendered only on front face to conserve GPU memory */}
+      {!back &&
+        [
+          { top: "14%", left: "22%", d: 0 },
+          { top: "32%", left: "78%", d: 1.1 },
+          { top: "58%", left: "18%", d: 2.2 },
+          { top: "72%", left: "62%", d: 0.6 },
+          { top: "22%", left: "54%", d: 1.7 },
+          { top: "82%", left: "88%", d: 2.8 },
+        ].map((s, i) => (
+          <motion.span
+            key={i}
+            aria-hidden
+            className="pointer-events-none absolute rounded-full"
+            style={{
+              top: s.top,
+              left: s.left,
+              width: 3,
+              height: 3,
+              background: theme.sparkleBackground,
+              boxShadow: theme.sparkleShadow,
+              mixBlendMode: "screen",
+              willChange: "opacity, transform",
+            }}
+            animate={{ opacity: [0.2, 0.9, 0.2], scale: [0.8, 1.2, 0.8] }}
+            transition={{
+              duration: 3 + (i % 3) * 0.8,
+              repeat: Infinity,
+              delay: s.d,
+              ease: "easeInOut",
+            }}
+          />
+        ))}
 
       {/* Noise grain */}
       <div
@@ -446,10 +448,10 @@ function InvestmentCardBase({
         <motion.div
           aria-hidden
           className="pointer-events-none absolute -inset-6 rounded-[36px]"
-          style={{ background: theme.glow, filter: "blur(28px)" }}
-          animate={{ opacity: [0.45, 0.85, 0.45] }}
-          whileHover={{ opacity: 0.9, filter: "blur(32px)" }}
-          transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+          style={{ background: theme.glow, filter: "blur(24px)", willChange: "opacity" }}
+          animate={{ opacity: [0.45, 0.75, 0.45] }}
+          whileHover={{ opacity: 0.85 }}
+          transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
         />
 
         {/* Interactive 3D card body */}

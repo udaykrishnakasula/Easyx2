@@ -20,13 +20,19 @@ class BehaviourTracker {
     this.flushTimeout = null;
 
     // Rage click state
-    this.clickHistory = []; // { x, y, target, time, elementInfo }
+    this.clickHistory = []; // { x, y, targetId, time, elInfo }
 
     // Dead click state
     this.pendingClicks = [];
     this.mutationObserved = false;
+    this.mutationObserver = null;
+    this.mutationDisconnectTimeout = null;
     this.lastNetworkCallTime = 0;
     this.lastLocationChangeTime = 0;
+
+    // Listeners for cleanup
+    this.clickHandler = null;
+    this.beforeUnloadHandler = null;
 
     // Screen view state
     this.currentRoute = typeof window !== "undefined" ? window.location.pathname : "/";
@@ -58,7 +64,6 @@ class BehaviourTracker {
     // Setup global listeners
     this.setupClickListener();
     this.setupNetworkInterceptor();
-    this.setupMutationObserver();
     this.setupLifecycleListeners();
     this.seedInitialAnalyticsDataIfEmpty();
   }
@@ -103,22 +108,26 @@ class BehaviourTracker {
   }
 
   setupClickListener() {
-    document.addEventListener("click", (e) => {
+    if (typeof document === "undefined") return;
+
+    this.clickHandler = (e) => {
       const now = Date.now();
       const target = e.target;
+      if (!target) return;
       const x = e.clientX;
       const y = e.clientY;
       const elInfo = this.getElementDescriptor(target);
+      const targetId = target.id || target.getAttribute?.("data-testid") || elInfo.selector;
 
       // --- 1. RAGE CLICK DETECTION ---
-      // Keep clicks in the last 1000ms
+      // Keep clicks in the last 1000ms - store lightweight targetId instead of raw DOM node
       this.clickHistory = this.clickHistory.filter((c) => now - c.time <= 1000);
-      this.clickHistory.push({ x, y, target, time: now, elInfo });
+      this.clickHistory.push({ x, y, targetId, time: now, elInfo });
 
       // Check if 3+ clicks happened on the same target or within 25px radius
       const nearbyClicks = this.clickHistory.filter(
         (c) =>
-          c.target === target ||
+          (targetId && c.targetId === targetId) ||
           Math.hypot(c.x - x, c.y - y) <= 25 ||
           (c.elInfo.selector && c.elInfo.selector === elInfo.selector)
       );
@@ -143,17 +152,24 @@ class BehaviourTracker {
       // --- 2. DEAD CLICK DETECTION ---
       // Only test elements that appear interactive
       if (elInfo.isInteractive) {
-        const clickId = "click_" + Math.random().toString(36).substring(2, 8);
         const snapshotUrl = window.location.pathname;
         const snapshotTime = now;
-        this.mutationObserved = false;
+        
+        // Scope mutation observation ONLY to this 450ms window
+        this.observeMutationWindow(450);
 
         // Queue check after 450ms
         setTimeout(() => {
           const urlChanged = window.location.pathname !== snapshotUrl;
           const networkHappened = this.lastNetworkCallTime > snapshotTime;
           const mutationHappened = this.mutationObserved;
-          const isInputFocus = document.activeElement === target || target.tagName === "INPUT" || target.tagName === "TEXTAREA";
+          const activeTag = document.activeElement?.tagName;
+          const isInputFocus = Boolean(
+            activeTag === "INPUT" ||
+            activeTag === "TEXTAREA" ||
+            activeTag === "SELECT" ||
+            (targetId && document.activeElement?.id === targetId)
+          );
 
           // If none of these happened on an interactive button/link, flag DEAD CLICK
           if (!urlChanged && !networkHappened && !mutationHappened && !isInputFocus) {
@@ -172,20 +188,51 @@ class BehaviourTracker {
           }
         }, 450);
       }
-    }, true);
+    };
+
+    document.addEventListener("click", this.clickHandler, true);
   }
 
-  setupMutationObserver() {
-    if (typeof MutationObserver !== "undefined") {
-      const observer = new MutationObserver(() => {
+  /**
+   * Scoped mutation observer: only runs for durationMs following an interactive click,
+   * observing childList only, and disconnects immediately upon detection or timeout.
+   */
+  observeMutationWindow(durationMs = 450) {
+    if (typeof MutationObserver === "undefined") return;
+    this.mutationObserved = false;
+
+    if (this.mutationObserver) {
+      this.mutationObserver.disconnect();
+      this.mutationObserver = null;
+    }
+    if (this.mutationDisconnectTimeout) {
+      clearTimeout(this.mutationDisconnectTimeout);
+      this.mutationDisconnectTimeout = null;
+    }
+
+    try {
+      this.mutationObserver = new MutationObserver(() => {
         this.mutationObserved = true;
+        if (this.mutationObserver) {
+          this.mutationObserver.disconnect();
+          this.mutationObserver = null;
+        }
       });
-      observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        characterData: true,
-      });
+      const root = document.body || document.documentElement;
+      if (root) {
+        this.mutationObserver.observe(root, {
+          childList: true,
+          subtree: true,
+        });
+      }
+      this.mutationDisconnectTimeout = setTimeout(() => {
+        if (this.mutationObserver) {
+          this.mutationObserver.disconnect();
+          this.mutationObserver = null;
+        }
+      }, durationMs);
+    } catch {
+      // Safe fallback
     }
   }
 
@@ -247,12 +294,45 @@ class BehaviourTracker {
   }
 
   setupLifecycleListeners() {
-    // Handle tab close / refresh: record active screen view duration and abandoned funnels
-    window.addEventListener("beforeunload", () => {
+    if (typeof window === "undefined") return;
+    this.beforeUnloadHandler = () => {
       this.handleScreenExit(this.currentRoute);
       this.handleTabCloseFunnels();
       this.flushQueueSync();
-    });
+    };
+    window.addEventListener("beforeunload", this.beforeUnloadHandler);
+  }
+
+  cleanup() {
+    if (typeof window === "undefined") return;
+
+    if (this.clickHandler) {
+      document.removeEventListener("click", this.clickHandler, true);
+      this.clickHandler = null;
+    }
+
+    if (this.beforeUnloadHandler) {
+      window.removeEventListener("beforeunload", this.beforeUnloadHandler);
+      this.beforeUnloadHandler = null;
+    }
+
+    if (this.mutationObserver) {
+      this.mutationObserver.disconnect();
+      this.mutationObserver = null;
+    }
+
+    if (this.mutationDisconnectTimeout) {
+      clearTimeout(this.mutationDisconnectTimeout);
+      this.mutationDisconnectTimeout = null;
+    }
+
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
+
+    this.clickHistory = [];
+    this.isInitialized = false;
   }
 
   /**

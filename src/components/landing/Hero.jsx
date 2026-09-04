@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/shared/context/AuthContext";
+import { useBranding } from "@/shared/context/BrandingContext";
 import localCoinMp4 from "@/assets/coin.mp4";
 
 const EasyxMark = () => (
@@ -31,6 +32,8 @@ const RAW_VIDEO_URL =
 export default function Hero() {
   const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
+  const { appName, appIconUrl } = useBranding();
+  const activeIcon = appIconUrl || "/uploads/branding/brand_1788453379866_40p372p.png";
   const videoRef = useRef(null);
   const [videoSrc, setVideoSrc] = useState(RAW_VIDEO_URL);
   const [isVideoLoaded, setIsVideoLoaded] = useState(false);
@@ -135,8 +138,28 @@ export default function Hero() {
       {/* Navbar overlays the hero */}
       <nav className="nav" data-testid="hero-navbar">
         <a href="#" className="nav__brand" data-testid="nav-brand">
-          <span className="nav__mark"><EasyxMark /></span>
-          <span className="nav__name">Easyx</span>
+          <span className="nav__mark" data-testid="nav-mark">
+            {activeIcon ? (
+              <img
+                src={activeIcon}
+                alt={`${appName || "EasyX"} Logo`}
+                className="nav__icon-img"
+                data-testid="landing-app-icon"
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                  const fallback = e.currentTarget.parentElement?.querySelector(".nav__fallback-mark");
+                  if (fallback) fallback.style.display = "grid";
+                }}
+              />
+            ) : null}
+            <span
+              className="nav__fallback-mark"
+              style={{ display: activeIcon ? "none" : "grid" }}
+            >
+              <EasyxMark />
+            </span>
+          </span>
+          <span className="nav__name">{appName || "Easyx"}</span>
         </a>
       </nav>
 

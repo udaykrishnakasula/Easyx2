@@ -29,7 +29,7 @@ import { monitoringService } from "./src/server/monitoringService";
 import { BackupService } from "./src/server/backupService";
 import { emailService } from "./src/server/emailService";
 import { promotionsService } from "./src/server/promotionsService";
-import { checkSupabaseConnection, isSupabaseAdminConfigured } from "./src/server/supabaseAdmin";
+import { checkSupabaseConnection, isSupabaseAdminConfigured, getSupabaseAdmin } from "./src/server/supabaseAdmin";
 
 // ==================== PRODUCTION ENVIRONMENT STARTUP CONFIGURATION ====================
 const isProduction = process.env.NODE_ENV === "production";
@@ -840,13 +840,12 @@ const seedDatabase = async () => {
   const adminPassword = process.env.ADMIN_PASSWORD || "Admin@Easyx2026";
   const adminHash = await bcrypt.hash(adminPassword, 10);
 
-  // Security enforcement: Strictly ONLY the designated sole admin account (subamcollection@gmail.com) is permitted to hold 'admin' role
-  for (const [uid, u] of db.users.entries()) {
-    const userEmail = (u.email || "").toLowerCase().trim();
-    if (userEmail !== soleAdminEmail && u.role === "admin") {
-      console.log(`[EasyX Security] Demoting non-authorized admin account ${userEmail} (${uid}) to standard 'user' role. Only ${soleAdminEmail} is permitted.`);
-      u.role = "user";
-    }
+  // Security: Ensure designated admin account is granted the 'admin' role
+  const soleAdminUser = Array.from(db.users.values()).find(
+    (u) => (u.email || "").toLowerCase().trim() === soleAdminEmail
+  );
+  if (soleAdminUser && soleAdminUser.role !== "admin") {
+    soleAdminUser.role = "admin";
   }
 
   let soleAdmin = Array.from(db.users.values()).find(
@@ -1281,7 +1280,8 @@ function sanitizeAuthToken(rawHeader?: string): string | null {
 }
 
 const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
-  const token = sanitizeAuthToken(req.headers.authorization);
+  const rawAuth = req.headers.authorization || (typeof req.query?.token === "string" ? req.query.token : undefined);
+  const token = sanitizeAuthToken(rawAuth);
   if (!token) {
     return res.status(401).json({ detail: "Not authenticated" });
   }
@@ -1307,7 +1307,8 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
 };
 
 const optionalAuthMiddleware = (req: Request, res: Response, next: NextFunction) => {
-  const token = sanitizeAuthToken(req.headers.authorization);
+  const rawAuth = req.headers.authorization || (typeof req.query?.token === "string" ? req.query.token : undefined);
+  const token = sanitizeAuthToken(rawAuth);
   if (token) {
     try {
       const payload = jwt.verify(token, JWT_SECRET) as any;
@@ -1330,13 +1331,14 @@ const adminMiddleware = (req: Request, res: Response, next: NextFunction) => {
     const user = (req as any).user;
     const soleAdminEmail = getSoleAdminEmail();
     const userEmail = (user?.email || "").toLowerCase().trim();
+    const isAdmin = user?.role === "admin" || (soleAdminEmail && userEmail === soleAdminEmail);
 
-    if (user?.role !== "admin" || userEmail !== soleAdminEmail) {
+    if (!isAdmin) {
       console.warn(
-        `[EasyX Security] Blocked unauthorized admin portal access attempt by user ${user?.id} (${userEmail}, role=${user?.role}). Only ${soleAdminEmail} is permitted.`
+        `[EasyX Security] Blocked unauthorized admin portal access attempt by user ${user?.id} (${userEmail}, role=${user?.role}).`
       );
       return res.status(403).json({
-        detail: `Access denied. Only the single designated administrator account (${soleAdminEmail}) is authorized to access the admin application.`,
+        detail: "Access denied. Administrator privileges required.",
       });
     }
     next();
@@ -1914,20 +1916,11 @@ api.post("/auth/login", loginLimiter, async (req, res) => {
     return res.status(401).json({ detail: "Invalid email or password. If you don't have an account, please sign up." });
   }
 
-  // Strict Single-Admin Enforcement:
-  // ONLY the designated sole admin email (subamcollection@gmail.com) is permitted to have the 'admin' role.
-  // Demote any other account immediately to 'user' role.
-  if (isSoleAdminEmail) {
-    if (user.role !== "admin") {
-      user.role = "admin";
-      saveDatabase();
-    }
-  } else {
-    if (user.role === "admin") {
-      console.log(`[EasyX Security] Demoting non-authorized account ${cleanEmail} from admin to standard user role. Strictly only ${soleAdminEmail} is permitted.`);
-      user.role = "user";
-      saveDatabase();
-    }
+  // Admin Role Guarantee:
+  // Ensure the designated sole admin email is always guaranteed the 'admin' role.
+  if (isSoleAdminEmail && user.role !== "admin") {
+    user.role = "admin";
+    saveDatabase();
   }
 
   let isPasswordValid = false;
@@ -2130,7 +2123,6 @@ api.post("/auth/resend-verification", emailVerificationLimiter, async (req, res)
     message: `A new verification email has been sent to ${maskEmail(cleanEmail)}.`,
     email: maskEmail(cleanEmail),
     cooldown_seconds: 60,
-    dev_code: verifyOtpCode,
     verification_token: verifyToken,
   });
 });
@@ -2330,12 +2322,34 @@ api.post("/auth/forgot-password", forgotPasswordLimiter, async (req, res) => {
   }
   const cleanEmail = String(email).trim().toLowerCase();
 
-  // Find user in database
+  // Find user in database or Supabase Auth
   let user: any = null;
   for (const u of db.users.values()) {
     if (u.email && u.email.trim().toLowerCase() === cleanEmail) {
       user = u;
       break;
+    }
+  }
+
+  if (!user && isSupabaseAdminConfigured()) {
+    try {
+      const supabaseAdmin = getSupabaseAdmin();
+      if (supabaseAdmin) {
+        const { data: userList } = await supabaseAdmin.auth.admin.listUsers();
+        const sbAuthUser = (userList?.users as any[])?.find(
+          (u: any) => u.email?.toLowerCase() === cleanEmail
+        );
+        if (sbAuthUser) {
+          user = {
+            id: sbAuthUser.id,
+            email: sbAuthUser.email,
+            name: sbAuthUser.user_metadata?.name || cleanEmail.split("@")[0],
+            role: sbAuthUser.user_metadata?.role || "user",
+          };
+        }
+      }
+    } catch (sbErr) {
+      console.error("[EasyX Auth] Supabase check error in forgot-password:", sbErr);
     }
   }
 
@@ -2363,7 +2377,6 @@ api.post("/auth/forgot-password", forgotPasswordLimiter, async (req, res) => {
       raw_email: cleanEmail,
       cooldown_seconds: remainingSec,
       expires_in_minutes: 15,
-      dev_code: recent.code,
       reset_token: recent.token,
     });
   }
@@ -2425,7 +2438,6 @@ api.post("/auth/forgot-password", forgotPasswordLimiter, async (req, res) => {
     raw_email: cleanEmail,
     expires_in_minutes: 15,
     cooldown_seconds: 60,
-    dev_code: otpCode,
     reset_token: resetToken,
   });
 });
@@ -2520,7 +2532,6 @@ api.post("/auth/resend-reset-code", forgotPasswordLimiter, async (req, res) => {
       raw_email: cleanEmail,
       cooldown_seconds: remainingSec,
       expires_in_minutes: 15,
-      dev_code: recent.code,
       reset_token: recent.token,
     });
   }
@@ -2580,7 +2591,6 @@ api.post("/auth/resend-reset-code", forgotPasswordLimiter, async (req, res) => {
     raw_email: cleanEmail,
     expires_in_minutes: 15,
     cooldown_seconds: 60,
-    dev_code: otpCode,
     reset_token: resetToken,
   });
 });
@@ -2605,6 +2615,30 @@ api.post("/auth/reset-password", forgotPasswordLimiter, async (req, res) => {
       break;
     }
   }
+
+  // Check Supabase if user not found in local memory DB
+  if (!user && isSupabaseAdminConfigured()) {
+    try {
+      const supabaseAdmin = getSupabaseAdmin();
+      if (supabaseAdmin) {
+        const { data: userList } = await supabaseAdmin.auth.admin.listUsers();
+        const sbAuthUser = (userList?.users as any[])?.find(
+          (u: any) => u.email?.toLowerCase() === cleanEmail
+        );
+        if (sbAuthUser) {
+          user = {
+            id: sbAuthUser.id,
+            email: sbAuthUser.email,
+            name: sbAuthUser.user_metadata?.name || cleanEmail.split("@")[0],
+            role: sbAuthUser.user_metadata?.role || "user",
+          };
+        }
+      }
+    } catch (sbErr) {
+      console.error("[EasyX Auth] Supabase check error in reset-password:", sbErr);
+    }
+  }
+
   if (!user) {
     return res.status(404).json({ detail: "User with this email not found." });
   }
@@ -2645,6 +2679,27 @@ api.post("/auth/reset-password", forgotPasswordLimiter, async (req, res) => {
   }
 
   saveDatabase();
+
+  // Synchronize new password to Supabase Auth if configured
+  if (isSupabaseAdminConfigured()) {
+    try {
+      const supabaseAdmin = getSupabaseAdmin();
+      if (supabaseAdmin) {
+        const { data: userList } = await supabaseAdmin.auth.admin.listUsers();
+        const sbAuthUser = (userList?.users as any[])?.find(
+          (u: any) => u.email?.toLowerCase() === cleanEmail
+        );
+        if (sbAuthUser) {
+          await supabaseAdmin.auth.admin.updateUserById(sbAuthUser.id, {
+            password: new_password,
+          });
+          console.log(`[EasyX Auth] Successfully synchronized password update to Supabase Auth for ${cleanEmail}`);
+        }
+      }
+    } catch (sbErr) {
+      console.error("[EasyX Auth] Error syncing password to Supabase Auth:", sbErr);
+    }
+  }
 
   // Send security alert confirmation email
   emailService.sendPasswordChangedAlert({
@@ -5485,6 +5540,13 @@ api.post(
       const filePath = path.join(BRANDING_UPLOADS_DIR, filename);
 
       fs.writeFileSync(filePath, file.buffer);
+      try {
+        const publicCopyDir = path.resolve("./public/uploads/branding");
+        if (!fs.existsSync(publicCopyDir)) fs.mkdirSync(publicCopyDir, { recursive: true });
+        fs.writeFileSync(path.join(publicCopyDir, filename), file.buffer);
+      } catch (copyErr) {
+        // Non-blocking fallback
+      }
       const publicUrl = `/uploads/branding/${filename}`;
 
       res.json({
@@ -9819,6 +9881,20 @@ api.post("/admin/promotions/reset", adminMiddleware, (req, res) => {
     console.error("[Admin Promotions] Reset error:", err);
     res.status(500).json({ detail: "Failed to reset promotions." });
   }
+});
+
+// API 404 fallback handler (prevents unhandled /api/* requests from returning HTML)
+api.use((_req, res) => {
+  res.status(404).json({ error: "not_found", detail: "API endpoint not found" });
+});
+
+// Centralized error handler for API routes
+api.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("[API Error]", err);
+  res.status(err?.status || 500).json({
+    error: err?.code || "internal_server_error",
+    detail: err?.message || "An unexpected error occurred",
+  });
 });
 
 // Mount /api

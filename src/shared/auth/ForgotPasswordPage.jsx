@@ -13,9 +13,8 @@ import {
   Eye,
   EyeOff,
   Lock,
-  Sparkles,
-  Info,
   Clock,
+  RotateCcw,
 } from "lucide-react";
 
 import { Button } from "@/shared/ui/button";
@@ -23,7 +22,21 @@ import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { api, apiError } from "@/shared/lib/api";
 import AuthLayout from "./AuthLayout";
-import { FORGOT_PASSWORD, LOGIN } from "@/constants/testIds/auth";
+import { FORGOT_PASSWORD } from "@/constants/testIds/auth";
+
+const RECOVERY_SESSION_KEY = "easyx_recovery_session";
+
+/**
+ * Pure helper to mask email address securely for display:
+ * e.g., subamcollection@gmail.com -> su***n@gmail.com
+ */
+export function maskEmail(email) {
+  if (!email || typeof email !== "string" || !email.includes("@")) return email || "";
+  const [local, domain] = email.split("@");
+  if (local.length <= 2) return `${local[0]}*@${domain}`;
+  if (local.length <= 4) return `${local.slice(0, 1)}**${local.slice(-1)}@${domain}`;
+  return `${local.slice(0, 2)}***${local.slice(-1)}@${domain}`;
+}
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate();
@@ -32,13 +45,14 @@ export default function ForgotPasswordPage() {
   // Wizard Steps: 1 = Enter Email, 2 = Verify Code, 3 = New Password, 4 = Success
   const [step, setStep] = useState(1);
 
-  // Form State
+  // Recovery Account State - strictly locked throughout the flow
   const [email, setEmail] = useState("");
   const [maskedEmail, setMaskedEmail] = useState("");
   const [code, setCode] = useState("");
   const [resetToken, setResetToken] = useState("");
-  const [devCode, setDevCode] = useState("");
+  const [sessionExpiredMessage, setSessionExpiredMessage] = useState("");
 
+  // Step 3 State
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -56,21 +70,47 @@ export default function ForgotPasswordPage() {
 
   const codeInputRef = useRef(null);
 
-  // Check URL params for direct reset link: ?email=...&token=...
+  // Initialize or restore recovery session safely
   useEffect(() => {
+    // 1. Direct deep link support: ?email=...&token=...
     const urlEmail = searchParams.get("email");
     const urlToken = searchParams.get("token") || searchParams.get("reset_token");
     const urlCode = searchParams.get("code");
 
-    if (urlEmail) {
-      setEmail(urlEmail);
-      setMaskedEmail(urlEmail);
-    }
-
     if (urlEmail && (urlToken || urlCode)) {
+      const cleanEmail = urlEmail.trim().toLowerCase();
+      setEmail(cleanEmail);
+      setMaskedEmail(maskEmail(cleanEmail));
       if (urlToken) setResetToken(urlToken);
       if (urlCode) setCode(urlCode);
-      setStep(3); // Jump directly to new password step if token provided
+      setStep(3); // Jump directly to new password step if verified token is present
+      return;
+    }
+
+    // 2. Check for active, unexpired recovery session in sessionStorage (handles page refresh)
+    try {
+      const rawSession = sessionStorage.getItem(RECOVERY_SESSION_KEY);
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession);
+        const now = Date.now();
+        if (parsed?.expiresAt && parsed.expiresAt > now && parsed?.email) {
+          setEmail(parsed.email);
+          setMaskedEmail(parsed.maskedEmail || maskEmail(parsed.email));
+          if (parsed.resetToken) setResetToken(parsed.resetToken);
+          if (parsed.step === 2 || parsed.step === 3) {
+            setStep(parsed.step);
+            setExpiresIn(Math.max(1, Math.floor((parsed.expiresAt - now) / 1000)));
+          }
+        } else {
+          // Session expired: purge and notify user cleanly
+          sessionStorage.removeItem(RECOVERY_SESSION_KEY);
+          if (parsed?.email) {
+            setSessionExpiredMessage("Your previous recovery session expired. Please enter your email to request a fresh verification code.");
+          }
+        }
+      }
+    } catch {
+      sessionStorage.removeItem(RECOVERY_SESSION_KEY);
     }
   }, [searchParams]);
 
@@ -87,7 +127,13 @@ export default function ForgotPasswordPage() {
   useEffect(() => {
     if (step !== 2 || expiresIn <= 0) return;
     const interval = setInterval(() => {
-      setExpiresIn((prev) => Math.max(0, prev - 1));
+      setExpiresIn((prev) => {
+        if (prev <= 1) {
+          sessionStorage.removeItem(RECOVERY_SESSION_KEY);
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
     return () => clearInterval(interval);
   }, [step, expiresIn]);
@@ -122,31 +168,81 @@ export default function ForgotPasswordPage() {
     return { label: "Strong & Secure", color: "bg-emerald-500", textColor: "text-emerald-400" };
   };
 
+  // Completely resets the flow and purges any active recovery session
+  const handleStartOver = () => {
+    try {
+      sessionStorage.removeItem(RECOVERY_SESSION_KEY);
+    } catch {
+      // Ignore
+    }
+    setEmail("");
+    setMaskedEmail("");
+    setCode("");
+    setResetToken("");
+    setExpiresIn(900);
+    setCooldown(0);
+    setSessionExpiredMessage("");
+    setStep(1);
+    toast.info("Please enter your registered email address to begin a new recovery request.");
+  };
+
+  // Exit back to sign-in and clear recovery session
+  const handleBackToLogin = () => {
+    try {
+      sessionStorage.removeItem(RECOVERY_SESSION_KEY);
+    } catch {
+      // Ignore
+    }
+    navigate("/login");
+  };
+
   // STEP 1: Request Reset Code via Email
   const handleRequestCode = async (e) => {
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
-      toast.error("Please enter your account email address.");
+      toast.error("Please enter your registered EasyX email address.");
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      toast.error("Please enter a valid email format.");
+      toast.error("Please enter a valid email address format.");
       return;
     }
 
     setRequestingCode(true);
+    setSessionExpiredMessage("");
     try {
       const { data } = await api.post("/auth/forgot-password", { email: cleanEmail });
-      toast.success(data.message || "Verification code sent to your email!");
-      setMaskedEmail(data.email || cleanEmail);
+      toast.success(data.message || "A 6-digit verification code has been sent to your email.");
+      
+      const computedMask = data.email || maskEmail(cleanEmail);
+      setEmail(cleanEmail);
+      setMaskedEmail(computedMask);
+      
+      const sessionExpiresInSeconds = (data.expires_in_minutes || 15) * 60;
       if (data.cooldown_seconds) setCooldown(data.cooldown_seconds);
-      if (data.expires_in_minutes) setExpiresIn(data.expires_in_minutes * 60);
+      setExpiresIn(sessionExpiresInSeconds);
       if (data.reset_token) setResetToken(data.reset_token);
-      if (data.dev_code) setDevCode(data.dev_code);
+
+      // Persist active recovery state in sessionStorage for safe browser refresh continuity
+      try {
+        sessionStorage.setItem(
+          RECOVERY_SESSION_KEY,
+          JSON.stringify({
+            email: cleanEmail,
+            maskedEmail: computedMask,
+            step: 2,
+            expiresAt: Date.now() + sessionExpiresInSeconds * 1000,
+            resetToken: data.reset_token || "",
+          })
+        );
+      } catch {
+        // Ignore storage quotas
+      }
+
       setStep(2);
     } catch (err) {
-      toast.error(apiError(err, "Failed to send reset code. Please try again."));
+      toast.error(apiError(err, "Unable to process recovery request. Please try again."));
     } finally {
       setRequestingCode(false);
     }
@@ -161,15 +257,34 @@ export default function ForgotPasswordPage() {
       return;
     }
 
+    const cleanEmail = email.trim().toLowerCase();
     setVerifyingCode(true);
     try {
       const { data } = await api.post("/auth/verify-reset-code", {
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         code: cleanCode,
         token: resetToken,
       });
       toast.success(data.message || "Email verified successfully!");
-      if (data.reset_token) setResetToken(data.reset_token);
+      const updatedToken = data.reset_token || resetToken;
+      if (updatedToken) setResetToken(updatedToken);
+
+      // Update session storage to Step 3
+      try {
+        sessionStorage.setItem(
+          RECOVERY_SESSION_KEY,
+          JSON.stringify({
+            email: cleanEmail,
+            maskedEmail: maskedEmail || maskEmail(cleanEmail),
+            step: 3,
+            expiresAt: Date.now() + 15 * 60 * 1000,
+            resetToken: updatedToken,
+          })
+        );
+      } catch {
+        // Ignore
+      }
+
       setStep(3);
     } catch (err) {
       toast.error(apiError(err, "Invalid or expired verification code."));
@@ -181,19 +296,34 @@ export default function ForgotPasswordPage() {
   // STEP 2: Resend Code
   const handleResendCode = async () => {
     if (cooldown > 0) return;
+    const cleanEmail = email.trim().toLowerCase();
     setResendingCode(true);
     try {
       const { data } = await api.post("/auth/resend-reset-code", {
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
       });
-      toast.success(data.message || "A new 6-digit verification code was sent.");
+      toast.success(data.message || "A new 6-digit verification code has been sent.");
       if (data.cooldown_seconds) setCooldown(data.cooldown_seconds);
       if (data.expires_in_minutes) setExpiresIn(data.expires_in_minutes * 60);
-      if (data.dev_code) setDevCode(data.dev_code);
       if (data.reset_token) setResetToken(data.reset_token);
       setCode("");
+
+      try {
+        sessionStorage.setItem(
+          RECOVERY_SESSION_KEY,
+          JSON.stringify({
+            email: cleanEmail,
+            maskedEmail: maskedEmail || maskEmail(cleanEmail),
+            step: 2,
+            expiresAt: Date.now() + (data.expires_in_minutes || 15) * 60 * 1000,
+            resetToken: data.reset_token || resetToken,
+          })
+        );
+      } catch {
+        // Ignore
+      }
     } catch (err) {
-      toast.error(apiError(err, "Failed to resend code."));
+      toast.error(apiError(err, "Failed to resend verification code."));
     } finally {
       setResendingCode(false);
     }
@@ -203,18 +333,19 @@ export default function ForgotPasswordPage() {
   const handleResetPassword = async (e) => {
     e.preventDefault();
     if (!newPassword || newPassword.length < 8) {
-      toast.error("Password must be at least 8 characters.");
+      toast.error("Password must be at least 8 characters long.");
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match. Please re-check.");
+      toast.error("Passwords do not match. Please re-enter.");
       return;
     }
 
+    const cleanEmail = email.trim().toLowerCase();
     setResettingPassword(true);
     try {
       const { data } = await api.post("/auth/reset-password", {
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         code: code.trim(),
         reset_token: resetToken,
         token: resetToken,
@@ -222,19 +353,19 @@ export default function ForgotPasswordPage() {
         confirm_password: confirmPassword,
       });
       toast.success(data.message || "Password updated successfully!");
+      
+      // Clear temporary recovery session
+      try {
+        sessionStorage.removeItem(RECOVERY_SESSION_KEY);
+      } catch {
+        // Ignore
+      }
+
       setStep(4);
     } catch (err) {
-      toast.error(apiError(err, "Failed to reset password."));
+      toast.error(apiError(err, "Failed to reset password. Please request a new code."));
     } finally {
       setResettingPassword(false);
-    }
-  };
-
-  // Auto-fill dev code for rapid testing
-  const handleUseDevCode = () => {
-    if (devCode) {
-      setCode(devCode);
-      toast.info("Auto-filled sandbox verification code.");
     }
   };
 
@@ -251,22 +382,23 @@ export default function ForgotPasswordPage() {
       }
       subtitle={
         step === 1
-          ? "Enter your account email to receive a secure 6-digit reset code."
+          ? "Enter your registered EasyX email address to receive a verification code."
           : step === 2
-          ? `We sent a 6-digit verification code to ${maskedEmail || email}.`
+          ? `We sent a 6-digit verification code to ${maskedEmail || maskEmail(email)}.`
           : step === 3
           ? "Choose a strong password to secure your EasyX account."
           : "Your account is secured and ready for sign-in."
       }
       footer={
         step !== 4 ? (
-          <Link
-            to="/login"
+          <button
+            type="button"
+            onClick={handleBackToLogin}
             className="text-white inline-flex items-center gap-1.5 underline underline-offset-4 hover:text-purple-300 transition"
             data-testid={FORGOT_PASSWORD.backToLoginLink}
           >
             <ArrowLeft className="h-3.5 w-3.5" /> Back to Sign In
-          </Link>
+          </button>
         ) : null
       }
     >
@@ -313,17 +445,26 @@ export default function ForgotPasswordPage() {
         })}
       </div>
 
-      {/* STEP 1: Enter Email */}
+      {/* Session Expired Banner if user refreshed after expiration */}
+      {sessionExpiredMessage && step === 1 && (
+        <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-start gap-2">
+          <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+          <span>{sessionExpiredMessage}</span>
+        </div>
+      )}
+
+      {/* STEP 1: Enter Registered Email */}
       {step === 1 && (
         <form onSubmit={handleRequestCode} className="space-y-4" data-testid="forgot-password-step-1">
           <div className="space-y-1.5">
             <Label htmlFor="forgot-email" className="text-white/80 flex items-center gap-1.5">
               <Mail className="h-3.5 w-3.5 text-purple-400" />
-              Account Email
+              Registered Email Address
             </Label>
             <Input
               id="forgot-email"
               type="email"
+              autoComplete="email"
               placeholder="you@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -337,7 +478,7 @@ export default function ForgotPasswordPage() {
           <div className="p-3 rounded-xl bg-purple-950/20 border border-purple-500/20 text-xs text-purple-200/90 leading-relaxed flex items-start gap-2">
             <ShieldCheck className="h-4 w-4 text-purple-400 shrink-0 mt-0.5" />
             <span>
-              For your account security, we'll send a 6-digit one-time verification code that expires in 15 minutes.
+              If an account is associated with this email, we will send a 6-digit verification code. It expires in 15 minutes.
             </span>
           </div>
 
@@ -361,19 +502,16 @@ export default function ForgotPasswordPage() {
       {/* STEP 2: Verify Code */}
       {step === 2 && (
         <form onSubmit={handleVerifyCode} className="space-y-4" data-testid="forgot-password-step-2">
-          {/* Target Email Info & Change Option */}
-          <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10 text-xs">
+          {/* Read-only Locked Email Display Badge */}
+          <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-xs flex items-center justify-between">
             <div className="flex items-center gap-2 truncate">
               <Mail className="h-4 w-4 text-purple-400 shrink-0" />
-              <span className="text-white font-mono truncate">{maskedEmail || email}</span>
+              <span className="text-white/60">Sent to:</span>
+              <strong className="text-white font-mono truncate">{maskedEmail || maskEmail(email)}</strong>
             </div>
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="text-purple-300 hover:text-white underline text-xs font-semibold shrink-0 ml-2"
-            >
-              Change
-            </button>
+            <span className="text-[10px] uppercase font-semibold tracking-wider text-purple-300 bg-purple-950/60 border border-purple-500/30 px-2 py-0.5 rounded-full shrink-0">
+              Locked
+            </span>
           </div>
 
           {/* Verification Code Input */}
@@ -403,35 +541,12 @@ export default function ForgotPasswordPage() {
               onChange={(e) => {
                 const val = e.target.value.replace(/\D/g, "").slice(0, 6);
                 setCode(val);
-                if (val.length === 6) {
-                  // Optional auto-trigger when 6 digits typed
-                }
               }}
               className="bg-white/5 border-white/15 text-white placeholder:text-white/20 h-12 text-center font-mono text-xl tracking-[0.35em] font-bold focus:border-purple-400"
               data-testid={FORGOT_PASSWORD.codeInput}
               required
             />
           </div>
-
-          {/* Dev/Sandbox Testing Helper */}
-          {devCode && (
-            <div className="p-2.5 rounded-xl bg-purple-950/30 border border-purple-500/30 text-xs text-purple-200 flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <Sparkles className="h-3.5 w-3.5 text-purple-400" />
-                <span>Sandbox Verification Code:</span>
-                <strong className="font-mono text-white text-sm bg-purple-900/60 px-1.5 py-0.5 rounded">
-                  {devCode}
-                </strong>
-              </div>
-              <button
-                type="button"
-                onClick={handleUseDevCode}
-                className="text-[11px] px-2 py-0.5 rounded bg-purple-600 hover:bg-purple-500 text-white font-medium transition"
-              >
-                Auto-fill
-              </button>
-            </div>
-          )}
 
           {/* Submit Verification Button */}
           <Button
@@ -450,7 +565,7 @@ export default function ForgotPasswordPage() {
           </Button>
 
           {/* Resend Code Button & Cooldown */}
-          <div className="text-center pt-2">
+          <div className="text-center pt-1">
             <button
               type="button"
               onClick={handleResendCode}
@@ -466,12 +581,31 @@ export default function ForgotPasswordPage() {
               {cooldown > 0 ? `Resend new code in ${cooldown}s` : "Resend Verification Code"}
             </button>
           </div>
+
+          {/* Explicit Start Over Link */}
+          <div className="pt-2 border-t border-white/5 text-center">
+            <button
+              type="button"
+              onClick={handleStartOver}
+              className="text-xs text-white/50 hover:text-white inline-flex items-center gap-1 transition"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Entered the wrong email? Use a different email
+            </button>
+          </div>
         </form>
       )}
 
       {/* STEP 3: Create New Password */}
       {step === 3 && (
         <form onSubmit={handleResetPassword} className="space-y-4" data-testid="forgot-password-step-3">
+          {/* Target Account Badge */}
+          <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-xs flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+            <span className="text-white/60">Updating password for:</span>
+            <strong className="text-white font-mono">{maskedEmail || maskEmail(email)}</strong>
+          </div>
+
           {/* New Password */}
           <div className="space-y-1.5">
             <Label htmlFor="new-pwd" className="text-white/80 flex items-center gap-1.5">
@@ -618,7 +752,7 @@ export default function ForgotPasswordPage() {
 
           <Button
             type="button"
-            onClick={() => navigate("/login", { replace: true })}
+            onClick={handleBackToLogin}
             className="w-full bg-white text-black hover:bg-white/90 rounded-full h-11 font-semibold transition"
             data-testid={FORGOT_PASSWORD.successSignInButton}
           >
