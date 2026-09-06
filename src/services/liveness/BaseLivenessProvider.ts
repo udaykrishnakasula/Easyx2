@@ -5,6 +5,7 @@ import {
   LivenessVerificationResult,
 } from "./types";
 import { api } from "@/shared/lib/api";
+import { cameraManager } from "@/services/camera/cameraManager";
 
 /**
  * Base Abstract Adapter for Liveness Providers.
@@ -31,47 +32,19 @@ export abstract class BaseLivenessProvider implements LivenessProvider {
     videoElement: HTMLVideoElement,
     facingMode: "user" | "environment" = "user"
   ): Promise<MediaStream> {
-    this.stopCamera();
-
-    if (!navigator?.mediaDevices?.getUserMedia) {
-      const err = new Error("Camera API is not supported on this browser/device.");
-      (err as any).code = "CAMERA_UNAVAILABLE";
-      throw err;
-    }
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: facingMode },
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-        },
-        audio: false,
-      });
-
+      const stream = await cameraManager.startCamera(facingMode, videoElement);
       this.activeStream = stream;
       this.activeVideoElement = videoElement;
-
-      videoElement.srcObject = stream;
-      videoElement.setAttribute("playsinline", "true");
-      videoElement.setAttribute("webkit-playsinline", "true");
-      videoElement.muted = true;
-
-      await videoElement.play();
       return stream;
     } catch (err: any) {
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      if (err.code === "PERMISSION_DENIED") {
         const error = new Error("Camera permission was denied. Please allow camera access in browser settings.");
         (error as any).code = "CAMERA_PERMISSION_DENIED";
         throw error;
       }
-      if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-        const error = new Error("No front-facing camera found on this device.");
-        (error as any).code = "CAMERA_UNAVAILABLE";
-        throw error;
-      }
-      if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-        const error = new Error("Camera is already in use by another application.");
+      if (err.code === "CAMERA_UNAVAILABLE") {
+        const error = new Error("Camera is unavailable or in use by another application.");
         (error as any).code = "CAMERA_UNAVAILABLE";
         throw error;
       }
@@ -80,16 +53,8 @@ export abstract class BaseLivenessProvider implements LivenessProvider {
   }
 
   stopCamera(): void {
-    if (this.activeStream) {
-      this.activeStream.getTracks().forEach((track) => {
-        try {
-          track.stop();
-        } catch {
-          // ignore
-        }
-      });
-      this.activeStream = null;
-    }
+    cameraManager.stopCamera();
+    this.activeStream = null;
 
     if (this.activeVideoElement) {
       try {
